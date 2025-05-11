@@ -1,6 +1,6 @@
 import logging
-from src.db.mongo import get_user_config, save_user_config
-from src.llm.gemini import get_gemini_response
+from db.mongo import get_user_config, save_user_config
+from llm.gemini import get_gemini_response
 
 logging.basicConfig(level=logging.INFO)
 

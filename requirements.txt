@@ -1,3 +1,5 @@
 pymongo
 google-generativeai
 python-dotenv
+fastapi
+uvicorn

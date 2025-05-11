@@ -1,6 +1,6 @@
 import sys
 import logging
-from src.core.tweak_agent import process_user_instruction
+from core.tweak_agent import process_user_instruction
 
 # Configure basic logging for the script's output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
