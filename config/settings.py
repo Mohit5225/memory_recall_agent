@@ -18,3 +18,24 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "user_settings") # Default Collec
 # --- LLM Settings ---
 # You could add model names, temperatures etc. here later
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-1.5-flash") # Default LLM model
+
+
+
+# --- Redis Settings for Celery ---
+REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
+# Optional: REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+# Optional: REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
+
+
+# Celery Broker and Backend URL (using Redis)
+# Construct URL based on settings
+# If using password: f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+CELERY_BROKER_URL: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0") # Default to DB 0
+CELERY_RESULT_BACKEND: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0") # Same as broker for simplicity
+
+
+# --- Twilio Settings (Future) ---
+# TWILIO_ACCOUNT_SID: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
+# TWILIO_AUTH_TOKEN: Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
+# TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER")
