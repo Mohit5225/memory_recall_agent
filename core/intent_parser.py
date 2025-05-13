@@ -1,5 +1,5 @@
 # src/core/intent_parser.py
-from src.llm.gemini import get_gemini_response
+from  llm.gemini import get_gemini_response
 import logging
 
 logger = logging.getLogger(__name__)
