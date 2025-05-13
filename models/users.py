@@ -1,6 +1,6 @@
 # src/models/user.py
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
-from typing import Optional, Annotated
+from typing import Optional, Annotated, Dict, Any
 from bson import ObjectId
 
 # --- Custom Pydantic Type for ObjectId Handling ---
@@ -12,8 +12,10 @@ def validate_objectid(v):
         return v
     if isinstance(v, str) and ObjectId.is_valid(v):
         return ObjectId(v)
+    # Pydantic v2 expects a PydanticCustomError or ValueError
     raise ValueError("Invalid ObjectId")
 
+# Use Annotated for Pydantic v2 validation
 PyObjectId = Annotated[ObjectId, BeforeValidator(validate_objectid)]
 
 # --- Dedicated Model for Nested Configuration ---
@@ -44,23 +46,36 @@ class User(BaseModel):
     # Future fields for auth and user profile (as suggested by review):
     # email: Optional[str] = None
     # password_hash: Optional[str] = None
-    # created_at: datetime = Field(default_factory=datetime.utcnow)    # Pydantic model configuration
+    # created_at: datetime = Field(default_factory=datetime.utcnow) # Requires datetime import
+    # updated_at: datetime = Field(default_factory=datetime.utcnow) # Requires datetime import
+    # roles: List[str] = Field(default_factory=list) # For role-based access control, requires List import
+    # last_login: Optional[datetime] = None # For activity logging, requires datetime import
+
+
+    # Pydantic model configuration
     model_config = ConfigDict(
-        # Core functionality
-        arbitrary_types_allowed=True,  # Allow ObjectId and other MongoDB types
-        from_attributes=True,  # Support mapping from ORM objects
-        populate_by_name=True,  # Allow populating by field name as well as alias
-        
-        # JSON handling
-        json_encoders={ObjectId: str},  # Convert ObjectId to string for JSON
-        
-        # Documentation and schema generation
-        json_schema_extra={
+        # This allows Pydantic to populate fields using aliases (_id -> id)
+        populate_by_name = True,
+        # Allow ObjectId and other MongoDB types that Pydantic might not
+        # natively validate without explicit rules. Essential for PyObjectId.
+        arbitrary_types_allowed = True,
+        # Support mapping from ORM objects or dictionaries using attribute/field names.
+        # Useful when creating model from DB dicts.
+        from_attributes = True,
+        # Configure JSON encoding for ObjectId to string
+        json_encoders = {ObjectId: str}, # Note: In Pydantic v2, json_encoders is within ConfigDict
+        # Add an example for documentation/schema generation
+        json_schema_extra = {
             "example": {
                 "user_id": "test_user_123",
                 "config": {
                     "full_instruction_prompt": "# My Custom Reminder Config\nTopic: Python\nStyle: Witty",
                 }
             }
-        }
+        },
     )
+
+
+# Add imports needed for future fields if you add them to the model definition
+# from datetime import datetime
+# from typing import List

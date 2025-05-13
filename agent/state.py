@@ -25,6 +25,7 @@ class AgentState(TypedDict):
     # --- Workflow Control Fields ---
     # Fields to control the flow of the graph
     next_action: str # What the graph should do next (e.g., "run_tweak_agent", "parse_input")
+    final_outcome: str = "processing_unknown"
     # ... other state fields will be added as we build out features
     # scheduled_task_id: Optional[str] # ID of a created Celery task
     # reminder_text: Optional[str] # The generated reminder content

@@ -1,43 +1,42 @@
 # main.py
-from fastapi import FastAPI, APIRouter
-from pydantic import BaseModel # Needed to define expected request body structure
+from fastapi import FastAPI, APIRouter, HTTPException
+from pydantic import BaseModel
 import logging
-from contextlib import asynccontextmanager # Needed for lifespan management in FastAPI
-# Import the new LangGraph State and Graph builder
-from agent.state import AgentState
-from agent.graph import build_agent_graph
+from contextlib import asynccontextmanager
+# Import the LangGraph State and Graph builder
+from agent.state import AgentState # Ensure this is imported
+from agent.graph import build_agent_graph # Ensure this is imported
 # Import DB client management functions for startup/shutdown
-from db.mongo import get_mongo_client, close_mongo_client
+from db.mongo import get_mongo_client, close_mongo_client # Ensure these are imported
 
-
-# Configure basic logging for the FastAPI app
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Application Lifespan Management ---
-# Use asynccontextmanager for newer FastAPI versions for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Context manager for application startup and shutdown events.
-    Handles MongoDB client connection/disconnection.
+    Handles MongoDB client connection/disconnection and LangGraph setup.
     """
     logger.info("Application startup initiated.")
     # Connect MongoDB client when the application starts
     mongo_client = get_mongo_client()
     if mongo_client is None:
-        logger.error("Failed to connect to MongoDB on startup!")
-        # Depending on how critical the DB is, you might want to raise an error here
-        # raise Exception("Database connection failed")
+        logger.error("Failed to connect to MongoDB on startup! Shutting down.")
+        raise RuntimeError("Database connection failed")
 
     # --- LangGraph Setup ---
-    # Build the LangGraph graph when the application starts
-    # Store it in app.state for access in endpoints
-    logger.info("Building LangGraph graph...")
-    app.state.agent_graph = build_agent_graph()
-    logger.info("✅ LangGraph graph available.")
+    logger.info("Building and compiling LangGraph graph...")
+    try:
+        app.state.agent_graph = build_agent_graph()
+        logger.info("✅ LangGraph graph available.")
+    except Exception as e:
+        logger.error(f"Failed to build LangGraph graph on startup: {e}")
+        raise RuntimeError(f"LangGraph compilation failed: {e}")
 
-    yield  # Application is ready to receive requests
+    yield # Application is ready to receive requests
 
     logger.info("Application shutdown initiated.")
     # Close MongoDB client when the application shuts down
@@ -50,16 +49,15 @@ app = FastAPI(
     title="Memory Recall Agent API",
     description="API for interacting with the Memory Recall Agent.",
     version="0.1.0",
-    lifespan=lifespan # Connect lifespan context manager
+    lifespan=lifespan
 )
 
 # Define a simple data model for the incoming chat request body
-# We will reuse this structure
 class ChatRequest(BaseModel):
     user_id: str
     message: str
 
-# Define an API router (useful for organizing endpoints as the app grows)
+# Define an API router
 api_router = APIRouter()
 
 @api_router.get("/", status_code=200)
@@ -73,20 +71,17 @@ def read_root():
 @api_router.get("/health", status_code=200)
 def health_check():
     """
-    Health check endpoint. Returns server status.
-    Also checks DB connection health.
+    Health check endpoint. Returns server status and DB connection health.
     """
     logger.info("Health check endpoint called.")
-    # Add a check for DB health
     client = get_mongo_client() # Get the shared client
+    db_status = "disconnected"
     if client:
         try:
             client.admin.command('ping') # Use a lightweight command to check
             db_status = "ok"
         except Exception:
             db_status = "error"
-    else:
-        db_status = "disconnected"
 
     return {"status": "ok", "database": db_status}
 
@@ -94,39 +89,42 @@ def health_check():
 @api_router.post("/chat", status_code=200)
 async def chat_endpoint(request: ChatRequest):
     """
-    Endpoint to receive user chat input and initiate agent processing.
-    Now creates the initial LangGraph state.
+    Endpoint to receive user chat input and initiate agent processing via LangGraph.
+    Now correctly retrieves the final outcome from the state.
     """
     user_id = request.user_id
     message = request.message
     logger.info(f"Received chat message for user '{user_id}': '{message}'")
 
     # --- Create Initial LangGraph State ---
-    # This is where the data for this interaction starts its journey through the graph.
     initial_state = AgentState(
         user_id=user_id,
         user_input=message,
-        current_config_prompt="", # Will be fetched by a node later
+        current_config_prompt="",
         parsed_intent="",
         llm_response="",
-        messages=[] # Start with empty messages for now
+        messages=[]
     )
     logger.info("Created initial AgentState.")
-    # logger.debug(f"Initial State: {initial_state}") # Uncomment for state detail
 
-    # --- Placeholder for LangGraph Invocation ---
-    # This is where we WILL invoke the graph with the initial state.
-    # The graph logic is not yet built beyond a simple entry/exit.
-    # In Step 2.4, this will become:
-    # final_state = await app.state.agent_graph.ainvoke(initial_state)
-    # logger.info("LangGraph invocation placeholder executed.")
-    # logger.debug(f"Final State (placeholder): {final_state}") # Example logging
+    # --- Invoke LangGraph ---
+    try:
+        logger.info("Invoking LangGraph agent...")
+        # Use ainvoke for async execution with FastAPI
+        final_state = await app.state.agent_graph.ainvoke(initial_state)
+        logger.info("✅ LangGraph invocation complete.")
+        logger.debug(f"Final State: {final_state}") # Log the full final state for debugging
 
+        # --- Retrieve Final Outcome from State ---
+        # Read the specific key set by the report_outcome_node
+        final_outcome = final_state.get("final_outcome", "processing_unknown") # Default if key missing
 
-    return {"status": "success", "message": "Input received, initial state created (LangGraph invocation placeholder)."}
+        return {"status": "success", "message": "Agent processed input.", "final_state_preview": final_outcome} # Return the explicit outcome
+
+    except Exception as e:
+        logger.error(f"Error during LangGraph invocation for user {user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Agent processing failed: {e}")
+
 
 # Include the defined routes in the main application
 app.include_router(api_router)
-
-# Note: You will run this with uvicorn from your terminal:
-# uvicorn main:app --reload
