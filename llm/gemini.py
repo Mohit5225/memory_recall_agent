@@ -1,5 +1,5 @@
 from google.generativeai import configure, GenerativeModel, GenerationConfig
-from config.settings import GOOGLE_API_KEY, LLM_MODEL_NAME
+from src.config.settings import GOOGLE_API_KEY, LLM_MODEL_NAME
 import logging
 
 logging.basicConfig(level=logging.INFO)

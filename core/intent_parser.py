@@ -1,5 +1,5 @@
 # src/core/intent_parser.py
-from  llm.gemini import get_gemini_response
+from  src.llm.gemini import get_gemini_response
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def parse_user_intent(user_input: str) -> str:
         # Validate the intent against expected categories (basic check)
         valid_intents = ["config_update", "schedule_request", "general_query", "acknowledge", "other"]
         if intent not in valid_intents:
-             logger.warning(f"LLM returned unexpected intent: '{intent}'. Defaulting to 'other'.")
+             logger.warning(f"LLM returned unexpecte    d intent: '{intent}'. Defaulting to 'other'.")
              return "other"
 
         logger.info(f"✅ Parsed intent: '{intent}'")
@@ -60,4 +60,4 @@ def parse_user_intent(user_input: str) -> str:
 
     except Exception as e:
         logger.error(f"Error during intent parsing for input '{user_input[:50]}...': {e}", exc_info=True)
-        return "other" # Default to 'other' on unexpected errors
+        return "other" # Default to 'other' on unexpected x
