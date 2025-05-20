@@ -1,9 +1,0 @@
-pymongo
-google-generativeai
-python-dotenv
-fastapi
-uvicorn
-celery[redis]  # Installs celery with redis support (uses redis-py internally)
-redis          # Explicitly installs redis-py (recommended for clarity and isolation)
-dateparser
-parsedatetime
