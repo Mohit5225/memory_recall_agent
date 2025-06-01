@@ -1,5 +1,5 @@
 # src/core/intent_parser.py
-from  src.llm.gemini import get_gemini_response
+from  src.llm.gemini import get_gemini_response_async
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ User Input: {user_input}
 Intent Category:"""
 
 
-def parse_user_intent(user_input: str) -> str:
+async def parse_user_intent(user_input: str) -> str:
     """
     Uses the LLM to classify the user's input into a predefined intent category.
 
@@ -40,7 +40,7 @@ def parse_user_intent(user_input: str) -> str:
 
     try:
         # Call the LLM via the gemini module
-        intent_raw = get_gemini_response(llm_prompt)
+        intent_raw = await get_gemini_response_async(llm_prompt)
 
         if intent_raw is None:
             logger.error("LLM returned None for intent parsing.")

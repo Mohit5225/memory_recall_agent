@@ -1,6 +1,6 @@
 import logging
 from src.db.mongo import get_user_config, save_user_config
-from src.llm.gemini import get_gemini_response
+from src.llm.gemini import get_gemini_response_async
 
 logging.basicConfig(level=logging.INFO)
 
@@ -56,7 +56,7 @@ DEFAULT_INSTRUCTIONS = """
 """ # End of default instructions. Replace this block.
 
 
-def process_user_instruction(user_id: str, new_instruction: str) -> bool:
+async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
     """
     Processes a new instruction from a user to update their configuration.
     Uses modular DB and LLM components.
@@ -97,7 +97,7 @@ def process_user_instruction(user_id: str, new_instruction: str) -> bool:
 
     # 3. Call the LLM API to get the revised instructions
     logging.info("Calling LLM to revise instructions...")
-    revised_instructions = get_gemini_response(llm_prompt)
+    revised_instructions = await get_gemini_response_async(llm_prompt)
 
     if revised_instructions is None:
         logging.error("Failed to get a valid response from LLM to revise instructions.")

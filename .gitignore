@@ -1,0 +1,8 @@
+﻿__pycache__/
+*.pyc
+venv/
+.env
+structure.txt
+.vscode/
+Thumbs.db
+Desktop.ini

@@ -2,7 +2,7 @@
 from celery_config.Celery_app import celery_app01
 from src.db.mongo import create_schedule_definition, get_schedule_by_id, find_schedules, update_schedule_by_id, delete_schedule_by_id, deactivate_schedule_by_id, DatabaseError
 from src.models.schedule import Schedule, PyObjectId, ScheduleType, ScheduleStatus # Import all relevant enums/models
-from src.llm.gemini import get_gemini_response # Assuming this is available and works
+from src.llm.gemini import get_gemini_response_async # Assuming this is available and works
 import logging
 from datetime import datetime, timedelta, timezone
 import json
@@ -461,7 +461,7 @@ Question:"""
 
 
 # --- Core Scheduling Logic ---
-def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, Any]:
+async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, Any]:
     """
     Orchestrates the LLM extraction, deterministic RRule parameter generation,
     and handles clarification requests.
@@ -478,7 +478,7 @@ def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, Any]:
 
     try:
         llm_prompt = SCHEDULING_EXTRACTION_PROMPT_TEMPLATE.format(user_input=user_input).strip()
-        raw_llm_output = get_gemini_response(llm_prompt)
+        raw_llm_output = await get_gemini_response_async(llm_prompt)
 
         if raw_llm_output is None:
             logger.error("LLM returned None for structured scheduling extraction.")
@@ -605,13 +605,13 @@ def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, Any]:
 
 
 # --- Function to Generate LLM Clarification Question ---
-def get_llm_clarification_question(missing_detail_key: str) -> str:
+async def get_llm_clarification_question(missing_detail_key: str) -> str:
     """
     Uses an LLM call to generate a natural language clarification question based on a key.
     """
     prompt = CLARIFICATION_PROMPT_TEMPLATE.format(missing_detail_key=missing_detail_key).strip()
     try:
-        response = get_gemini_response(prompt)
+        response = await get_gemini_response_async(prompt)
         if response:
             return response.strip()
         logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Falling back to generic.")
