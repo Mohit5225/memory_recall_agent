@@ -16,6 +16,7 @@ async def get_gemini_response_async(prompt: str, retries: int = 3) -> str | None
     
     for attempt in range(retries):
         try:
+            logging.info(f"Sending prompt to Gemini: {prompt[:100]}...")
             response = await model.generate_content_async(
                 contents=[{"parts": [{"text": prompt}]}],
                 generation_config={
@@ -23,13 +24,15 @@ async def get_gemini_response_async(prompt: str, retries: int = 3) -> str | None
                     "max_output_tokens": 2048
                 }
             )
-            if hasattr(response, 'text'):
-                logging.info("✅ Received valid async response from Gemini.")
-                return response.text
-            logging.warning(f"Unexpected response structure: {response}")
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                logging.warning(f"Block reason: {response.prompt_feedback.block_reason}")
-            return None
+            logging.info(f"Raw Gemini response: {response}")
+            if not hasattr(response, 'text'):
+                logging.error("❌ Gemini response missing text attribute")
+                return "I apologize, but I'm having trouble processing your request."
+
+            logging.info("✅ Received valid async response from Gemini with text attribute")
+            logging.info(f"Response text: {response.text}")
+            return response.text
+
         except exceptions.ResourceExhausted:
             if attempt < retries - 1:
                 delay = 2 ** attempt * 10
@@ -40,4 +43,4 @@ async def get_gemini_response_async(prompt: str, retries: int = 3) -> str | None
                 return None
         except Exception as e:
             logging.error(f"API Error: {str(e)}")
-            return None
+            return "I apologize, but I'm having trouble processing your request."

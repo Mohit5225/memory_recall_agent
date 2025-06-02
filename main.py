@@ -1,3 +1,4 @@
+# main.py
 from pathlib import Path
 import sys
 import logging
@@ -136,8 +137,12 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         )
         logger.info(f"Initial state created: {initial_state}")
 
-        # Execute the agent graph with the initial state
-        final_state = app.state.agent_graph.invoke(initial_state)
+        # Verify MongoDB connection before graph execution
+        client = await get_mongo_client()
+        await client.admin.command('ping')  # Ensure DB is reachable
+
+        # Execute the agent graph with the initial state (use ainvoke for async)
+        final_state = await app.state.agent_graph.ainvoke(initial_state)
         logger.info(f"Agent graph execution completed. Final state: {final_state}")
         
         response = {

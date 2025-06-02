@@ -14,10 +14,8 @@ logger = logging.getLogger(__name__)
 async def entry_node(state: AgentState) -> AgentState:
     """Initial entry point of the graph. Logs entry."""
     logger.info(f"--- Entering graph for user: {state['user_id']} ---")
-    return {} # No state update needed here, just proceed
+    return {}  # No state update needed here, just proceed
 
-
-# Node to Call the Intent Parsing Logic
 async def call_intent_parser(state: AgentState) -> AgentState:
     """
     LangGraph node to call the core parse_user_intent function.
@@ -25,19 +23,16 @@ async def call_intent_parser(state: AgentState) -> AgentState:
     """
     logger.info(f"--- Executing Intent Parsing Node for user: {state['user_id']} ---")
     user_input = state['user_input']
-    parsed_intent = await parse_user_intent(user_input)
+    parsed_intent = await parse_user_intent(user_input) or "other"  # Fallback for robustness
     logger.info(f"Intent Parsing Node identified intent: '{parsed_intent}'")
     return {"parsed_intent": parsed_intent}
 
-
-# Node to Call the Core Tweak Agent Logic
 async def call_tweak_agent(state: AgentState) -> AgentState:
     """
     LangGraph node to call the core process_user_instruction function.
     Handles outcomes and exceptions. Returns outcome for transition and final result.
     """
     logger.info(f"--- Executing Tweak Config Node for user: {state['user_id']} ---")
-
     user_id = state['user_id']
     user_input = state['user_input']
 
@@ -46,7 +41,6 @@ async def call_tweak_agent(state: AgentState) -> AgentState:
 
     try:
         success = await process_user_instruction(user_id, user_input)
-
         if success is True:
             logger.info("Tweak agent reported success.")
             outcome_key = "tweak_success"
@@ -59,7 +53,6 @@ async def call_tweak_agent(state: AgentState) -> AgentState:
             logger.error("Tweak agent reported critical error.")
             outcome_key = "tweak_critical_failure"
             final_outcome = "An internal error occurred during configuration update."
-
     except Exception as e:
         logger.error(f"Unhandled exception in tweak agent node for user {user_id}: {e}", exc_info=True)
         outcome_key = "tweak_exception"
@@ -71,7 +64,6 @@ async def call_tweak_agent(state: AgentState) -> AgentState:
         "final_outcome": final_outcome
     }
 
-# Node to Call the Scheduling Logic
 async def call_scheduling_logic(state: AgentState) -> AgentState:
     """
     LangGraph node to call the core scheduling logic function.
@@ -85,7 +77,6 @@ async def call_scheduling_logic(state: AgentState) -> AgentState:
     try:
         outcome_dict = await schedule_reminder_task(user_id, user_input)
         return outcome_dict
-
     except DatabaseError as e:
         logger.error(f"Database error caught in scheduling node for user {user_id}: {e}", exc_info=True)
         return {
@@ -99,25 +90,19 @@ async def call_scheduling_logic(state: AgentState) -> AgentState:
             "final_outcome": f"An unexpected error occurred while processing your schedule request."
         }
 
-
-# Final Outcome Node (Revised to just set the final outcome from state)
-# This node now primarily ensures the final_outcome is correctly placed in the state
-# before ending, using the value already set by previous nodes.
 async def report_outcome_node(state: AgentState) -> AgentState:
     """
     Final node in the graph that ensures the final_outcome is correctly placed in state.
     """
     logger.info(f"--- Executing Report Outcome Node for user: {state['user_id']} ---")
-    # The final_outcome should already be set by previous nodes
     final_outcome = state.get('final_outcome', "Operation completed.")
     logger.info(f"Final outcome: {final_outcome}")
     return {"final_outcome": final_outcome}
 
-
 # --- Graph Builder ---
-def build_agent_graph() -> StateGraph:
+def build_agent_graph():
     """
-    Builds and returns the LangGraph workflow for the agent.
+    Builds and returns the compiled LangGraph workflow for the agent.
     """
     # Create a new graph
     workflow = StateGraph(AgentState)
@@ -134,15 +119,15 @@ def build_agent_graph() -> StateGraph:
     workflow.add_edge("entry", "parse_intent")
 
     # Branch based on parsed intent
-    workflow.add_conditional_edges(  # type: ignore
+    workflow.add_conditional_edges(
         "parse_intent",
         lambda x: x["parsed_intent"],
         {
             "config_update": "tweak_config",
             "schedule_request": "schedule",
-            "general_query": "report_outcome",  # For now, just acknowledge
-            "acknowledge": "report_outcome",     # Simple acknowledgment
-            "other": "report_outcome"           # Fallback path
+            "general_query": "report_outcome",
+            "acknowledge": "report_outcome",
+            "other": "report_outcome"
         }
     )
 
@@ -174,8 +159,10 @@ def build_agent_graph() -> StateGraph:
     # Mark report_outcome as the end of all paths
     workflow.add_edge("report_outcome", END)
 
-    logger.info("✅ LangGraph workflow built successfully.")
-    return workflow
+    # Compile the graph into a runnable workflow
+    compiled_workflow = workflow.compile()
+    logger.info("✅ LangGraph workflow compiled successfully.")
+    return compiled_workflow
 
 # Example usage (for testing this file if needed)
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import dateparser
 from typing import Optional, Dict, Any, List, Tuple
 from dateutil.rrule import rrule, rrulestr, YEARLY, MONTHLY, WEEKLY, DAILY, HOURLY, MINUTELY, SECONDLY, MO, TU, WE, TH, FR, SA, SU
 import pytz # For timezone conversions
-
+from bson import ObjectId
 logger = logging.getLogger(__name__)
 
 # --- Custom Exception for Clarification Needed ---
@@ -513,7 +513,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
             if value is None and expected_type is not (str, type(None)): # if it's mandatory and None
                  logger.warning(f"Missing mandatory field from LLM: {key}")
                  return {"status": "clarification_needed", 
-                         "question": get_llm_clarification_question(key),
+                         "question": await get_llm_clarification_question(key),
                          "missing_field": key}
             if value is not None and not isinstance(value, expected_type):
                 logger.warning(f"Invalid type for field '{key}': Expected {expected_type}, got {type(value)}")
@@ -522,7 +522,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
                     parsed_params_raw["schedule_value"] = {} # Default to empty dict
                 else:
                     return {"status": "clarification_needed",
-                            "question": get_llm_clarification_question(f"invalid_{key}_format"),
+                            "question": await get_llm_clarification_question(f"invalid_{key}_format"),
                             "missing_field": key}
         
         # Validate ScheduleType enum
@@ -530,7 +530,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
         if classified_type_str not in [e.value for e in ScheduleType]:
             logger.warning(f"LLM output contained invalid schedule_type: {classified_type_str}")
             return {"status": "clarification_needed",
-                    "question": get_llm_clarification_question("schedule_type"),
+                    "question": await get_llm_clarification_question("schedule_type"),
                     "missing_field": "schedule_type"}
         
         schedule_type = ScheduleType(classified_type_str) # Convert to enum
@@ -540,7 +540,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
         if not prompt_id_str or not ObjectId.is_valid(prompt_id_str):
             logger.warning(f"Invalid or missing reminder_content_prompt_id: {prompt_id_str}")
             return {"status": "clarification_needed",
-                    "question": get_llm_clarification_question("invalid_prompt_id"),
+                    "question": await get_llm_clarification_question("invalid_prompt_id"),
                     "missing_field": "reminder_content_prompt_id"}
         
         # --- Step 2: Generate RRule Parameters and Calculate Next Run ---
@@ -561,7 +561,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
             except ScheduleClarificationNeeded as e:
                 logger.warning(f"Clarification needed for 'once' schedule: {e.missing_field} - {e.message}")
                 return {"status": "clarification_needed",
-                        "question": get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
+                        "question": await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
                         "missing_field": e.missing_field}
         else:
             # For recurring schedules, generate rrule_params and then calculate initial_next_run_at
@@ -571,12 +571,12 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
             except ScheduleClarificationNeeded as e:
                 logger.warning(f"Clarification needed for recurring schedule: {e.missing_field} - {e.message}")
                 return {"status": "clarification_needed",
-                        "question": get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
+                        "question": await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
                         "missing_field": e.missing_field}
             except Exception as e:
                 logger.error(f"Unexpected error during rrule generation/calculation: {e}", exc_info=True)
                 return {"status": "clarification_needed",
-                        "question": get_llm_clarification_question("rrule_calculation_error"),
+                        "question": await get_llm_clarification_question("rrule_calculation_error"),
                         "missing_field": "rrule_calculation_error"}
 
         # Prepare final parameters for Schedule model
@@ -633,6 +633,7 @@ async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any
         parsing_result = await parse_schedule_parameters_and_clarify(user_input)
 
         if parsing_result["status"] == "clarification_needed":
+            
             logger.info(f"Schedule clarification needed: {parsing_result.get('missing_field')}")
             return {
                 "next": "schedule_clarification",
