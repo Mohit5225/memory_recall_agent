@@ -5,6 +5,26 @@ from bson import ObjectId
 from datetime import datetime, timezone # Import timezone for UTC operations
 from .users import PyObjectId # Reuse the custom ObjectId type
 from dateutil.rrule import rrule, rruleset, DAILY, WEEKLY, MONTHLY, YEARLY, MO, TU, WE, TH, FR, SA, SU
+from enum import Enum, auto
+
+# --- Schedule Type Enum ---
+class ScheduleType(str, Enum):
+    """Defines the supported types of schedules."""
+    ONCE = "once"         # One-time schedule
+    DAILY = "daily"       # Repeats every day
+    WEEKLY = "weekly"     # Repeats on specific days of the week
+    MONTHLY = "monthly"   # Repeats on specific days of the month
+    INTERVAL = "interval" # Repeats at custom intervals (e.g., every 3 hours)
+    NONE_OTHER = "none_other" # Used when schedule type can't be determined
+
+# --- Schedule Status Enum ---
+class ScheduleStatus(str, Enum):
+    """Defines the possible states of a schedule."""
+    ACTIVE = "active"       # Schedule is enabled and will trigger
+    PAUSED = "paused"       # Schedule is temporarily disabled
+    COMPLETED = "completed" # Schedule has finished its run
+    CANCELLED = "cancelled" # Schedule was manually cancelled
+    ERROR = "error"         # Schedule encountered an error
 
 # --- Model for a Stored Schedule Entry ---
 # This defines the structure of a document in MongoDB
@@ -21,7 +41,7 @@ class Schedule(BaseModel):
 
     # The type of schedule recurrence (e.g., "daily", "weekly", "one-time", "interval")
     # This remains similar but will be a parsed value from user input
-    schedule_type: str = Field(...) # Renamed from recurrence_rule for clarity in DB context
+    schedule_type: ScheduleType = Field(...) # Now uses the ScheduleType enum
 
     # The detailed schedule value, e.g., {"time": "09:00"} or {"day_of_week": "Monday", "time": "10:00"}
     # This is where the 'sophisticated' rule details live - primarily for display/auditing the LLM's raw parse

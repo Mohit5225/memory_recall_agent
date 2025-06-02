@@ -25,7 +25,7 @@ celery_app01 = Celery(
     'memory_recall_agent',
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=['src.task']  # Includes tasks from src/task.py dynamically
+    include=[]  # Includes tasks from src/task.py dynamically
 )
 
 # Configure Celery App with standard settings for reliability

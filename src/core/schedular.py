@@ -622,82 +622,84 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
 
 
 # --- Function to Schedule a Reminder Task via Celery (Handles parsing outcome) ---
-def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any]:
+async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any]:
     """
-    Orchestrates the entire scheduling process: parsing, validation, clarification, and DB persistence.
-    This is the primary entry point for scheduling a new reminder.
-
-    Returns a dictionary indicating outcome for LangGraph:
-    - {"next": "schedule_success", "final_outcome": str, "schedule_id": str}
-    - {"next": "awaiting_clarification", "question": str, "missing_field": str}
-    - {"next": "schedule_failure", "final_outcome": str}
+    Processes a scheduling request and creates a new schedule definition.
+    Handles both raw text scheduling requests and already-parsed parameters.
     """
-    logger.info(f"Initiating schedule request for user: {user_id} with input: '{user_input[:100]}...'")
-
-    parsing_result = parse_schedule_parameters_and_clarify(user_input)
-
-    if parsing_result["status"] == "clarification_needed":
-        return {
-            "next": "awaiting_clarification",
-            "question": parsing_result["question"],
-            "missing_field": parsing_result["missing_field"]
-        }
-    elif parsing_result["status"] == "failure":
-        return {
-            "next": "schedule_failure",
-            "final_outcome": parsing_result["message"]
-        }
-    
-    # If status is "success"
-    schedule_params = parsing_result["schedule_params"]
-
+    logger.info(f"Processing schedule request for user: {user_id}")
     try:
-        # Create a Schedule Pydantic model instance
-        schedule_definition = Schedule(
-            user_id=user_id,
-            name=schedule_params["name"],
-            schedule_type=schedule_params["schedule_type"],
-            schedule_value=schedule_params["schedule_value"],
-            rrule_params=schedule_params["rrule_params"], # This is the key addition
-            next_run_at=schedule_params["next_run_at"],
-            last_run_at=schedule_params["last_run_at"],
-            reminder_content_prompt_id=schedule_params["reminder_content_prompt_id"],
-            status=schedule_params["status"],
-            timezone=schedule_params["timezone"],
-            notes=schedule_params["notes"],
-        )
+        # Parse the schedule parameters from the user input
+        parsing_result = await parse_schedule_parameters_and_clarify(user_input)
 
-        # Use the new create_schedule_definition function from mongo.py
-        schedule_id = create_schedule_definition(schedule_definition)
-
-        if schedule_id:
-            logger.info(f"✅ Schedule definition saved in DB. Schedule ID: {schedule_id}")
-            # In a full Celery Beat integration, you'd now inform Celery Beat
-            # to refresh its schedule. This often happens via watching the DB or
-            # a custom signal/API endpoint. For now, it's just saved.
+        if parsing_result["status"] == "clarification_needed":
+            logger.info(f"Schedule clarification needed: {parsing_result.get('missing_field')}")
             return {
-                "next": "schedule_success",
-                "final_outcome": f"Schedule '{schedule_params['name']}' saved successfully. I will send reminders based on your request.",
-                "schedule_id": str(schedule_id)
+                "next": "schedule_clarification",
+                "final_outcome": f"I need more information to set up your schedule. {parsing_result.get('question', '')}",
+                "missing_field": parsing_result.get("missing_field")
             }
-        else:
-            logger.error(f"Failed to save schedule definition for user {user_id} - create_schedule_definition returned None.")
+        elif parsing_result["status"] == "error":
+            logger.error(f"Failed to parse schedule parameters: {parsing_result.get('message')}")
             return {
                 "next": "schedule_failure",
-                "final_outcome": "Failed to save your schedule due to an internal database issue. Please try again."
+                "final_outcome": parsing_result["message"]
             }
+        
+        # If status is "success"
+        schedule_params = parsing_result["schedule_params"]
 
-    except DatabaseError as e:
-        logger.error(f"Database error during schedule definition process for user {user_id}: {e}", exc_info=True)
-        return {"next": "schedule_db_error", "final_outcome": "A database error prevented saving your schedule."}
+        try:
+            # Create a Schedule Pydantic model instance
+            schedule_definition = Schedule(
+                user_id=user_id,
+                name=schedule_params["name"],
+                schedule_type=schedule_params["schedule_type"],
+                schedule_value=schedule_params["schedule_value"],
+                rrule_params=schedule_params["rrule_params"],
+                next_run_at=schedule_params["next_run_at"],
+                last_run_at=schedule_params["last_run_at"],
+                reminder_content_prompt_id=schedule_params["reminder_content_prompt_id"],
+                status=schedule_params["status"],
+                timezone=schedule_params["timezone"],
+                notes=schedule_params["notes"],
+            )
+
+            # Use the new create_schedule_definition function from mongo.py
+            schedule_id = await create_schedule_definition(schedule_definition)
+
+            if schedule_id:
+                logger.info(f"✅ Schedule definition saved in DB. Schedule ID: {schedule_id}")
+                return {
+                    "next": "schedule_success",
+                    "final_outcome": f"Schedule '{schedule_params['name']}' saved successfully. I will send reminders based on your request.",
+                    "schedule_id": str(schedule_id)
+                }
+            else:
+                logger.error(f"Failed to save schedule definition for user {user_id} - create_schedule_definition returned None.")
+                return {
+                    "next": "schedule_failure",
+                    "final_outcome": "Failed to save your schedule due to an internal database issue. Please try again."
+                }
+
+        except DatabaseError as e:
+            logger.error(f"Database error during schedule definition process for user {user_id}: {e}", exc_info=True)
+            return {"next": "schedule_db_error", "final_outcome": "A database error prevented saving your schedule."}
+        except Exception as e:
+            logger.error(f"Unexpected error during schedule definition process for user {user_id}: {e}", exc_info=True)
+            return {"next": "schedule_exception", "final_outcome": "An internal system error occurred while processing your scheduling request."}
+
     except Exception as e:
-        logger.error(f"Unexpected error during schedule definition process for user {user_id}: {e}", exc_info=True)
-        return {"next": "schedule_exception", "final_outcome": "An internal system error occurred while processing your scheduling request."}
+        logger.error(f"Error in schedule_reminder_task for user {user_id}: {e}", exc_info=True)
+        return {
+            "next": "schedule_exception",
+            "final_outcome": "An unexpected error occurred while processing your scheduling request."
+        }
 
 
 # --- Functions for managing existing schedules ---
 
-def list_schedules_for_user(user_id: str) -> List[Schedule]:
+async def list_schedules_for_user(user_id: str) -> List[Schedule]:
     """
     Fetches and returns all active schedules for a given user.
     Raises DatabaseError on critical errors.
@@ -705,7 +707,7 @@ def list_schedules_for_user(user_id: str) -> List[Schedule]:
     try:
         logger.info(f"Listing active schedules for user: {user_id}")
         # find_schedules now accepts user_id as an explicit argument
-        schedules = find_schedules(user_id=user_id, query_params={"status": ScheduleStatus.ACTIVE.value})
+        schedules = await find_schedules(user_id=user_id, query_params={"status": ScheduleStatus.ACTIVE.value})
         logger.info(f"Found {len(schedules)} active schedules for user {user_id}.")
         return schedules
     except DatabaseError:
@@ -714,7 +716,7 @@ def list_schedules_for_user(user_id: str) -> List[Schedule]:
         logger.error(f"Unexpected error listing schedules for user {user_id}: {e}", exc_info=True)
         raise DatabaseError(f"Error listing schedules: {e}") from e
 
-def update_existing_schedule(schedule_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+async def update_existing_schedule(schedule_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
     """
     Updates an existing schedule in the database.
     Performs validation on updates to ensure data integrity.
@@ -723,7 +725,7 @@ def update_existing_schedule(schedule_id: str, updates: Dict[str, Any]) -> Dict[
     logger.info(f"Attempting to update schedule ID: {schedule_id} with updates: {updates}")
     try:
         # Fetch existing schedule to apply partial updates and re-validate
-        existing_schedule = get_schedule_by_id(schedule_id)
+        existing_schedule = await get_schedule_by_id(schedule_id)
         if not existing_schedule:
             logger.warning(f"Schedule with ID {schedule_id} not found for update.")
             return {"status": "failure", "message": f"Schedule with ID {schedule_id} not found."}
@@ -763,16 +765,16 @@ def update_existing_schedule(schedule_id: str, updates: Dict[str, Any]) -> Dict[
                  logger.warning(f"Clarification needed during update rrule recalculation: {e.missing_field} - {e.message}")
                  # This is a complex case: update logic might need to signal clarification
                  # For now, treat as failure, LangGraph would need to initiate a new clarification flow.
+                 question = await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field)
                  return {"status": "clarification_needed",
-                         "question": get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
+                         "question": question,
                          "missing_field": e.missing_field}
-
 
         # Convert model back to dict for database update, excluding _id and created_at
         db_updates = updated_schedule_model.model_dump(by_alias=True, exclude_unset=True, exclude={'_id', 'created_at'})
 
         # Perform the actual database update
-        success = update_schedule_by_id(schedule_id, db_updates)
+        success = await update_schedule_by_id(schedule_id, db_updates)
 
         if success:
             logger.info(f"✅ Schedule ID: {schedule_id} updated successfully in DB.")
@@ -789,7 +791,7 @@ def update_existing_schedule(schedule_id: str, updates: Dict[str, Any]) -> Dict[
         return {"status": "failure", "message": "An unexpected error occurred while updating the schedule."}
 
 
-def deactivate_and_delete_schedule(schedule_id: str, soft_delete: bool = True) -> Dict[str, Any]:
+async def deactivate_and_delete_schedule(schedule_id: str, soft_delete: bool = True) -> Dict[str, Any]:
     """
     Deactivates or permanently deletes a schedule.
     Soft delete (setting status to 'inactive') is preferred.
@@ -799,10 +801,10 @@ def deactivate_and_delete_schedule(schedule_id: str, soft_delete: bool = True) -
         success = False
         message_prefix = "Schedule"
         if soft_delete:
-            success = deactivate_schedule_by_id(schedule_id)
+            success = await deactivate_schedule_by_id(schedule_id)
             message_prefix = "Schedule deactivated"
         else:
-            success = delete_schedule_by_id(schedule_id)
+            success = await delete_schedule_by_id(schedule_id)
             message_prefix = "Schedule deleted permanently"
 
         if success:

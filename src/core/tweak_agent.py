@@ -56,6 +56,7 @@ DEFAULT_INSTRUCTIONS = """
 """ # End of default instructions. Replace this block.
 
 
+# --- Core Function ---
 async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
     """
     Processes a new instruction from a user to update their configuration.
@@ -70,54 +71,55 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
     """
     logging.info(f"Processing instruction for user: {user_id} - '{new_instruction}'")
 
-    # 1. Get existing config from DB (or use default if none)
-    existing_instructions = get_user_config(user_id)
+    try:
+        # 1. Get existing config from DB (or use default if none)
+        existing_instructions = await get_user_config(user_id)
 
-    if existing_instructions is None:
-        logging.error(f"Failed to retrieve user config for {user_id}. Cannot proceed.")
-        return False # Indicate failure
+        if existing_instructions is None:
+            logging.error(f"Failed to retrieve user config for {user_id}. Cannot proceed.")
+            return False  # Indicate failure
 
-    if not existing_instructions.strip(): # Check if fetched config is empty or just whitespace
-        logging.info(f"No existing config found for {user_id} in DB. Using default instructions.")
-        current_instructions = DEFAULT_INSTRUCTIONS.strip() # Use and strip default
-    else:
-         logging.info(f"Using existing config for {user_id} from DB.")
-         current_instructions = existing_instructions.strip() # Use and strip fetched
+        if not existing_instructions.strip():  # Check if fetched config is empty or just whitespace
+            logging.info(f"No existing config found for {user_id} in DB. Using default instructions.")
+            current_instructions = DEFAULT_INSTRUCTIONS.strip()  # Use and strip default
+        else:
+            logging.info(f"Using existing config for {user_id} from DB.")
+            current_instructions = existing_instructions.strip()  # Use and strip fetched
 
-    # 2. Construct the prompt for the LLM to perform the 'tweak'
-    llm_prompt = TWEAK_AGENT_PROMPT_TEMPLATE.format(
-        existing_instructions=current_instructions,
-        new_instruction=new_instruction
-    ).strip() # Strip prompt whitespace
+        # 2. Construct the prompt for the LLM to perform the 'tweak'
+        llm_prompt = TWEAK_AGENT_PROMPT_TEMPLATE.format(
+            existing_instructions=current_instructions,
+            new_instruction=new_instruction
+        ).strip()  # Strip prompt whitespace
 
-    logging.info("Constructed LLM prompt for tweaking.")
-    # Optional: uncomment to print the full prompt sent to LLM (can be large)
-    # logging.info(f"--- Full Prompt sent to LLM ---\n{llm_prompt}\n--- End of Full Prompt ---")
+        logging.info("Constructed LLM prompt for tweaking.")
 
+        # 3. Call the LLM API to get the revised instructions
+        logging.info("Calling LLM to revise instructions...")
+        revised_instructions = await get_gemini_response_async(llm_prompt)
 
-    # 3. Call the LLM API to get the revised instructions
-    logging.info("Calling LLM to revise instructions...")
-    revised_instructions = await get_gemini_response_async(llm_prompt)
+        if revised_instructions is None:
+            logging.error("Failed to get a valid response from LLM to revise instructions.")
+            return False  # Indicate failure
 
-    if revised_instructions is None:
-        logging.error("Failed to get a valid response from LLM to revise instructions.")
-        return False # Indicate failure
+        # Ensure the LLM returned text and strip potential surrounding quotes/whitespace
+        revised_instructions = revised_instructions.strip().strip('`').strip()  # Basic cleaning
 
-    # Ensure the LLM returned text and strip potential surrounding quotes/whitespace
-    revised_instructions = revised_instructions.strip().strip('`').strip() # Basic cleaning - refine later
+        # 4. Save the revised instructions back to the DB
+        logging.info("Saving revised instructions to DB...")
+        save_success = await save_user_config(user_id, revised_instructions)
 
+        if save_success:
+            logging.info(f"✅ User {user_id} config update process completed.")
+            logging.info("Preview of updated config (first 5 non-empty lines):")
+            lines = revised_instructions.split('\n')
+            non_empty_lines = [line for line in lines if line.strip()]
+            logging.info('\n'.join(non_empty_lines[:5]))
+            return True  # Indicate success
+        else:
+            logging.error(f"Failed to save revised config for user {user_id}.")
+            return False  # Indicate failure
 
-    # 4. Save the revised instructions back to the DB
-    logging.info("Saving revised instructions to DB...")
-    save_success = save_user_config(user_id, revised_instructions)
-
-    if save_success:
-        logging.info(f"✅ User {user_id} config update process completed.")
-        logging.info("Preview of updated config (first 5 non-empty lines):")
-        lines = revised_instructions.split('\n')
-        non_empty_lines = [line for line in lines if line.strip()]
-        logging.info('\n'.join(non_empty_lines[:5]))
-        return True # Indicate success
-    else:
-        logging.error(f"Failed to save revised config for user {user_id}.")
-        return False # Indicate failure
+    except Exception as e:
+        logging.error(f"Error processing instruction for user {user_id}: {e}", exc_info=True)
+        return False  # Indicate failure

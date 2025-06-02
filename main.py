@@ -93,7 +93,7 @@ async def database_error_handler(request: Request, exc: DatabaseError):
 api_router = APIRouter()
 
 @api_router.get("/", status_code=200)
-def read_root():
+async def read_root():
     """
     Root endpoint. Returns a simple welcome message.
     """
@@ -101,19 +101,18 @@ def read_root():
     return {"message": "Welcome to the Memory Recall Agent API!"}
 
 @api_router.get("/health", status_code=200)
-def health_check():
+async def health_check():
     """
     Health check endpoint. Returns server status and DB connection health.
     """
     logger.info("Health check endpoint called.")
-    client = get_mongo_client()  # Get the shared client
-    db_status = "disconnected"
-    if client:
-        try:
-            client.admin.command('ping')  # Use a lightweight command to check
-            db_status = "ok"
-        except Exception:
-            db_status = "error"
+    try:
+        client = await get_mongo_client()  # Get the shared client asynchronously
+        await client.admin.command('ping')  # Use a lightweight command to check connection
+        db_status = "ok"
+    except Exception as e:
+        logger.error(f"Health check database error: {e}")
+        db_status = "error"
 
     return {"status": "ok", "database": db_status}
 
@@ -138,7 +137,7 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         logger.info(f"Initial state created: {initial_state}")
 
         # Execute the agent graph with the initial state
-        final_state = await app.state.agent_graph.ainvoke(initial_state)
+        final_state = app.state.agent_graph.invoke(initial_state)
         logger.info(f"Agent graph execution completed. Final state: {final_state}")
         
         response = {
