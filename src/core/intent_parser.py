@@ -1,6 +1,8 @@
 # src/core/intent_parser.py
 from  src.llm.gemini import get_gemini_response_async
 import logging
+from typing import Optional
+from src.agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +26,14 @@ User Input: {user_input}
 Intent Category:"""
 
 
-async def parse_user_intent(user_input: str) -> str:
+async def parse_user_intent(user_input: str, state: Optional[AgentState] = None) -> str:
     """
     Uses the LLM to classify the user's input into a predefined intent category.
+    If the intent is unclear, engages in iterative clarification with the user.
 
     Args:
         user_input: The raw input string from the user.
+        state: The current state of the agent's workflow (optional).
 
     Returns:
         A string representing the classified intent category. Defaults to 'other' on error.
@@ -44,7 +48,7 @@ async def parse_user_intent(user_input: str) -> str:
 
         if intent_raw is None:
             logger.error("LLM returned None for intent parsing.")
-            return "other" # Default to 'other' on LLM failure
+            return await handle_unclear_intent(user_input, state)
 
         # Basic cleaning of LLM output to get just the intent string
         intent = intent_raw.strip().lower()
@@ -52,12 +56,49 @@ async def parse_user_intent(user_input: str) -> str:
         # Validate the intent against expected categories (basic check)
         valid_intents = ["config_update", "schedule_request", "general_query", "acknowledge", "other"]
         if intent not in valid_intents:
-             logger.warning(f"LLM returned unexpecte    d intent: '{intent}'. Defaulting to 'other'.")
-             return "other"
+            logger.warning(f"LLM returned unexpected intent: '{intent}'. Engaging clarification.")
+            return await handle_unclear_intent(user_input, state)
 
         logger.info(f"✅ Parsed intent: '{intent}'")
         return intent
 
     except Exception as e:
         logger.error(f"Error during intent parsing for input '{user_input[:50]}...': {e}", exc_info=True)
-        return "other" # Default to 'other' on unexpected x
+        return await handle_unclear_intent(user_input, state)
+
+
+async def handle_unclear_intent(user_input: str, state: Optional[AgentState]) -> str:
+    """
+    Handles cases where the intent is unclear by engaging in iterative clarification with the user.
+
+    Args:
+        user_input: The raw input string from the user.
+        state: The current state of the agent's workflow (optional).
+
+    Returns:
+        A string representing the clarified intent category.
+    """
+    if state:
+        clarification_prompt = "I couldn't understand your request. Could you clarify what you want to do?"
+        state['llm_response'] = clarification_prompt
+        logger.info("Engaging user for clarification.")
+        # Simulate sending clarification to the user and receiving a response
+        # In a real implementation, this would involve a back-and-forth interaction
+        clarified_input = await get_user_clarification(state)
+        return await parse_user_intent(clarified_input, state)
+
+    return "other"  # Default to 'other' if state is not available
+
+
+async def get_user_clarification(state: AgentState) -> str:
+    """
+    Simulates getting clarification from the user. Replace with actual user interaction logic.
+
+    Args:
+        state: The current state of the agent's workflow.
+
+    Returns:
+        The clarified user input.
+    """
+    # Placeholder for user interaction logic
+    return state.get('user_input', "")  # Return the original input as a fallback
