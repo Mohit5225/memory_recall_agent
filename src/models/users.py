@@ -1,9 +1,8 @@
 # src/models/user.py
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
-from typing import Optional, Annotated, Dict, Any, List
+from typing import Optional, Annotated
 from bson import ObjectId
 from datetime import datetime, timezone
-from .message import Message  # Import the new Message model
 
 # --- Custom Pydantic Type for ObjectId Handling ---
 def validate_objectid(v):
@@ -21,12 +20,12 @@ PyObjectId = Annotated[ObjectId, BeforeValidator(validate_objectid)]
 # Provides better structure, type hinting, and validation for config data.
 # As suggested by the review.
 class UserConfig(BaseModel):
-    """Configuration and state for a user, including conversation history."""
+    """Configuration and state for a user."""
     full_instruction_prompt: str = ""
-    messages: List[Message] = Field(default_factory=list)  # Message history
     message_limit: int = Field(default=10)  # Max messages to keep in history
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timezone: str = Field(default="UTC")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -34,7 +33,7 @@ class UserConfig(BaseModel):
 # Represents the structure of a user document in MongoDB.
 # Uses the custom PyObjectId and the nested UserConfig model.
 class User(BaseModel):
-    """User model with configuration and message history."""
+    """User model with configuration."""
     # Map MongoDB's _id to a Pydantic field named 'id'
     # Use the custom PyObjectId type for correct handling
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
@@ -73,6 +72,8 @@ class User(BaseModel):
                 "user_id": "test_user_123",
                 "config": {
                     "full_instruction_prompt": "# My Custom Reminder Config\nTopic: Python\nStyle: Witty",
+                    "message_limit": 10,
+                    "timezone": "UTC"
                 }
             }
         },

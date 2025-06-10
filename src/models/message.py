@@ -23,8 +23,13 @@ class Message(BaseModel):
             "timestamp": self.timestamp,
             "context": self.context or {}
         }
-    
-    @classmethod
+      @classmethod
     def from_dict(cls, data: dict) -> "Message":
         """Create a Message instance from a dictionary (e.g., from database)."""
+        return cls(
+            content=data["content"],
+            role=data["role"],
+            timestamp=data["timestamp"],
+            context=data.get("context", {})
+        )
         return cls(**data)

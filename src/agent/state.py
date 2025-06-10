@@ -3,10 +3,19 @@ from typing import TypedDict, Annotated, List
 from typing_extensions import NotRequired
 import operator
 from src.models.message import Message
-from src.db.mongo import save_message, get_recent_messages, prune_old_messages
+from datetime import datetime, timezone
+import asyncio
+import logging
+from typing import List
+
+from src.db.mongo import save_message, get_messages, DatabaseError
+from src.agent.graph import DEFAULT_CONTEXT_WINDOW
+
+logger = logging.getLogger(__name__)
 
 # Define the AgentState using TypedDict
 # This is the central state object that LangGraph nodes will read from and write to.
+# Annotated allows combining a type with metadata (like an operator for combining lists)
 class AgentState(TypedDict):
     """Represents the state of the agent's workflow for a single interaction."""
 
@@ -27,21 +36,64 @@ class AgentState(TypedDict):
     next_action: str # What the graph should do next (e.g., "run_tweak_agent", "parse_input")
     final_outcome: NotRequired[str] # Result of the interaction
 
-# --- Message Management Functions ---
-async def load_message_history(user_id: str, limit: int = 7) -> List[Message]:
-    """Load recent message history for a user with optimized retrieval."""
-    return await get_recent_messages(user_id, limit)
+    # --- Message Handling ---
+    # Fields and methods to manage message caching and context windows
+    _message_cache: List[dict] # Internal cache for storing messages
+    _context_window: int # Current size of the context window
 
-async def append_messages(user_id: str, new_messages: List[Message]) -> bool:
-    """
-    Append new messages to the user's history with proper persistence.
-    Returns True if all messages were saved successfully.
-    """
-    success = True
-    for message in new_messages:
-        if not await save_message(user_id, message):
-            success = False
-    
-    # Prune old messages in background
-    await prune_old_messages(user_id)
-    return success
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.current_task = None
+        self.last_update = datetime.now(timezone.utc)
+        self._message_cache = []
+        self._context_window = DEFAULT_CONTEXT_WINDOW
+
+    async def load_messages(self) -> None:
+        """Load messages from database into local cache."""
+        try:
+            messages = await get_messages(self.user_id, self._context_window)
+            self._message_cache = messages
+        except DatabaseError as e:
+            logger.error(f"Failed to load messages for user {self.user_id}: {e}")
+            self._message_cache = []
+
+    async def add_message(self, content: str, role: str, context: dict = None) -> bool:
+        """
+        Add a new message to both database and local cache.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            # Save to database first
+            success = await save_message(self.user_id, content, role, context)
+            if not success:
+                return False
+
+            # Update local cache
+            new_message = {
+                "content": content,
+                "role": role,
+                "timestamp": datetime.now(timezone.utc),
+                "context": context or {}
+            }
+            self._message_cache.append(new_message)
+            
+            # Maintain context window size
+            if len(self._message_cache) > self._context_window:
+                self._message_cache = self._message_cache[-self._context_window:]
+            
+            return True
+
+        except DatabaseError as e:
+            logger.error(f"Failed to add message for user {self.user_id}: {e}")
+            return False
+
+    def get_context_messages(self, window: int = None) -> List[dict]:
+        """Get messages from local cache respecting context window."""
+        window = window or self._context_window
+        return self._message_cache[-window:] if self._message_cache else []
+
+    def update_context_window(self, size: int) -> None:
+        """Update the context window size and refresh local cache."""
+        if size != self._context_window:
+            self._context_window = size
+            asyncio.create_task(self.load_messages())  # Refresh cache with new window size

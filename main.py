@@ -17,7 +17,7 @@ from src.agent.graph import build_agent_graph
 # Import DB client management functions for startup/shutdown
 from src.db.mongo import (
     get_mongo_client, close_mongo_client, DatabaseError, save_message, get_recent_messages,
-    migrate_messages_to_include_context, prune_old_messages
+    prune_old_messages
 )
 from src.models.message import Message
 
@@ -39,7 +39,6 @@ async def lifespan(app: FastAPI):
     """
     Manages the application lifecycle:
     - Sets up database connections 
-    - Runs necessary migrations
     - Creates the agent graph
     - Cleans up on shutdown
     """
@@ -51,10 +50,6 @@ async def lifespan(app: FastAPI):
             logger.error("❌ Failed to connect to MongoDB on startup! Shutting down.")
             raise RuntimeError("Database connection failed")
         logger.info("✅ MongoDB connection established.")
-
-        # Run any necessary database migrations
-        await migrate_messages_to_include_context()
-        logger.info("✅ Database migrations completed.")
 
         # --- LangGraph Setup ---
         logger.info("Building and compiling LangGraph graph...")
