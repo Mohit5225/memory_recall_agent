@@ -13,13 +13,16 @@ INTENT_PARSING_PROMPT_TEMPLATE = """
 You are an intent classification system for an AI agent.
 Your task is to categorize the user's request into one of the following predefined intents:
 
-- config_update: The user wants to change the agent's configuration (topic, style, tone, length).
-- schedule_request: The user wants to set up, modify, or ask about reminder scheduling.
+- config_update: The user wants to change the agent's configuration (topic, style, tone, length). Only use this when they explicitly request to change settings.
+- schedule_request: The user wants to set up, modify, or ask about reminder scheduling. Also use this when the user is responding to scheduling clarification questions.
 - general_query: The user is asking a question or making a statement that is not a config update or schedule request. This includes asking questions about the reminder topic.
+- clarification_request: The user is asking for clarification about what information is needed or what they should do next.
 - acknowledge: The user is simply acknowledging something or saying thanks (e.g., "ok", "got it", "thanks").
 - other: The user's request does not fit clearly into any of the above categories.
 
-Analyze the user's input carefully. Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation.
+Analyze the user's input carefully. If the user is asking what information is needed or what to do next, classify it as "clarification_request".
+
+Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation.
 
 User Input: {user_input}
 
@@ -54,7 +57,7 @@ async def parse_user_intent(user_input: str, state: Optional[AgentState] = None)
         intent = intent_raw.strip().lower()
 
         # Validate the intent against expected categories (basic check)
-        valid_intents = ["config_update", "schedule_request", "general_query", "acknowledge", "other"]
+        valid_intents = ["config_update", "schedule_request", "general_query", "acknowledge", "clarification_request", "other"]
         if intent not in valid_intents:
             logger.warning(f"LLM returned unexpected intent: '{intent}'. Engaging clarification.")
             return await handle_unclear_intent(user_input, state)

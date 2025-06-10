@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from dateutil.rrule import rrule, rrulestr, YEARLY, MONTHLY, WEEKLY, DAILY, HOURLY, MINUTELY, SECONDLY, MO, TU, WE, TH, FR, SA, SU
 import pytz # For timezone conversions
 from bson import ObjectId
+import uuid
 logger = logging.getLogger(__name__)
 
 # --- Custom Exception for Clarification Needed ---
@@ -18,6 +19,7 @@ class ScheduleClarificationNeeded(Exception):
     """Custom exception raised when more information is needed to define a schedule."""
     def __init__(self, message: str, missing_field: str, clarification_prompt_key: str = None):
         super().__init__(message)
+        self.message = message  # Store message as instance attribute
         self.missing_field = missing_field
         self.clarification_prompt_key = clarification_prompt_key or missing_field # Key for specific LLM prompt
 
@@ -33,7 +35,7 @@ Expected JSON Schema:
   "schedule_type": "string (one of: daily, weekly, monthly, once, interval, none_other - based on frequency or specific dates)",
   "schedule_value": "object (details for the schedule_type, e.g., {{"time": "10:00"}} for daily, {{"day_of_week": "Monday", "time": "09:00"}} for weekly, {{"date": "2025-12-31", "time": "14:00"}} for once, {{"interval": 2, "unit": "days"}} for interval. Empty object if not specified)",
   "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - infer from context or default to 'Asia/Kolkata' if unsure, use IANA format)",
-  "reminder_content_prompt_id": "string (The MongoDB ObjectId as a string for the full instruction prompt that defines the reminder content)",
+  "reminder_content_prompt_id": "string (Optional - The MongoDB ObjectId as a string for a predefined reminder template, or null if using direct message)",
   "notes": "string (any other relevant scheduling details or constraints, or null if none - e.g., 'weekends only', 'every other day')"
 }}
 
@@ -44,47 +46,46 @@ The 'schedule_value' object should contain the specific details for the chosen '
 Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
 
 Examples:
-User: "Schedule a daily AI update reminder at 9 AM IST and use the prompt ID abcdef123456789012345678"
+User: "Schedule a daily AI update reminder at 9 AM IST
 JSON Output:
 {{
   "name": "Daily AI Update Reminder",
   "schedule_type": "daily",
   "schedule_value": {{"time": "09:00 AM"}},
   "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": "abcdef123456789012345678",
+  "reminder_content_prompt_id": null,
   "notes": null
 }}
 
-User: "Remind me weekly every Tuesday at 3pm PST about the team sync using prompt ID fedcba987654321098765432"
+User: "Remind me weekly every Tuesday at 3pm PST about the team sync 
 JSON Output:
 {{
   "name": "Team Sync Reminder",
   "schedule_type": "weekly",
-  "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},
-  "timezone": "America/Los_Angeles",
-  "reminder_content_prompt_id": "fedcba987654321098765432",
+  "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},  "timezone": "America/Los_Angeles",
+  "reminder_content_prompt_id": null,
   "notes": null
 }}
 
-User: "Schedule a one-time reminder for my project deadline on 2025-06-30 at 5 PM using prompt ID 1234567890abcdef12345678"
+User: "Schedule a one-time reminder for my project deadline on 2025-06-30 at 5 PM"
 JSON Output:
 {{
   "name": "Project Deadline Reminder",
   "schedule_type": "once",
   "schedule_value": {{"date": "2025-06-30", "time": "5:00 PM"}},
   "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": "1234567890abcdef12345678",
+  "reminder_content_prompt_id": null,
   "notes": null
 }}
 
-User: "Remind me every 3 hours about stretching using prompt ID 11111111112222222222333333"
+User: "Remind me every 3 hours to stretch"
 JSON Output:
 {{
   "name": "Stretching Reminder",
   "schedule_type": "interval",
   "schedule_value": {{"interval": 3, "unit": "hours"}},
   "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": "11111111112222222222333333",
+  "reminder_content_prompt_id": null,
   "notes": null
 }}
 
@@ -150,14 +151,21 @@ class RRuleGenerator:
     def generate_rrule_params(self) -> Dict[str, Any]:
         """
         Generates dateutil.rrule parameters from schedule_type and schedule_value.
-        Raises ScheduleClarificationNeeded if required information is missing.
         """
+        logger.info("========= Generating RRule Parameters =========")
+        logger.info(f"Schedule Type: {self.schedule_type}")
+        logger.info(f"Schedule Value: {json.dumps(self.schedule_value, indent=2)}")
+        logger.info(f"User Timezone: {self.user_timezone_str}")
+        
         rrule_params: Dict[str, Any] = {}
-        hour, minute, second = None, None, None
+        
+        # Parse time if present
         time_str = self.schedule_value.get("time")
         if time_str:
+            logger.info(f"🔄 Parsing time string: {time_str}")
             hour, minute, second = self._parse_time(time_str)
             if hour is None or minute is None:
+                logger.warning(f"❌ Failed to parse time: {time_str}")
                 raise ScheduleClarificationNeeded(
                     f"Invalid time format detected: {time_str}",
                     missing_field="time",
@@ -165,9 +173,12 @@ class RRuleGenerator:
                 )
             rrule_params['byhour'] = [hour]
             rrule_params['byminute'] = [minute]
-            rrule_params['bysecond'] = [second if second is not None else 0] # Default seconds to 0
+            rrule_params['bysecond'] = [second if second is not None else 0]
+            logger.info(f"✅ Parsed time components - Hour: {hour}, Minute: {minute}, Second: {second}")
 
+        # Handle different schedule types
         if self.schedule_type == ScheduleType.ONCE.value:
+            logger.info("Processing one-time schedule...")
             date_str = self.schedule_value.get("date")
             if not date_str:
                 raise ScheduleClarificationNeeded(
@@ -187,6 +198,7 @@ class RRuleGenerator:
             return {} # No rrule params for 'once'
 
         elif self.schedule_type == ScheduleType.DAILY.value:
+            logger.info("Processing daily schedule...")
             rrule_params['freq'] = DAILY
             if hour is None or minute is None:
                 raise ScheduleClarificationNeeded(
@@ -196,6 +208,7 @@ class RRuleGenerator:
                 )
 
         elif self.schedule_type == ScheduleType.WEEKLY.value:
+            logger.info("Processing weekly schedule...")
             rrule_params['freq'] = WEEKLY
             day_of_week_str = self.schedule_value.get("day_of_week")
             if not day_of_week_str:
@@ -220,6 +233,7 @@ class RRuleGenerator:
                 )
 
         elif self.schedule_type == ScheduleType.MONTHLY.value:
+            logger.info("Processing monthly schedule...")
             rrule_params['freq'] = MONTHLY
             day_of_month = self.schedule_value.get("day_of_month") # e.g., 15
             if day_of_month is not None:
@@ -268,6 +282,7 @@ class RRuleGenerator:
                 )
 
         elif self.schedule_type == ScheduleType.INTERVAL.value:
+            logger.info("Processing interval schedule...")
             interval = self.schedule_value.get("interval")
             unit = self.schedule_value.get("unit")
             if interval is None or unit is None:
@@ -465,56 +480,65 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
     """
     Orchestrates the LLM extraction, deterministic RRule parameter generation,
     and handles clarification requests.
-
-    Returns:
-        A dictionary with either:
-        - {"status": "success", "schedule_params": Dict[str, Any]}
-        - {"status": "clarification_needed", "question": str, "missing_field": str}
-        - {"status": "failure", "message": str}
     """
-    logger.debug(f"Attempting LLM structured scheduling parameter parsing for: '{user_input[:100]}...'")
-    raw_llm_output = None
-    parsed_params_raw: Optional[Dict[str, Any]] = None
+    logger.info("========= Starting Parameter Parsing =========")
+    logger.info(f"Processing user input: '{user_input}'")
 
     try:
+        # Construct LLM prompt
         llm_prompt = SCHEDULING_EXTRACTION_PROMPT_TEMPLATE.format(user_input=user_input).strip()
+        logger.info("🔄 Generated LLM prompt:")
+        logger.info("---BEGIN PROMPT---")
+        logger.info(llm_prompt)
+        logger.info("---END PROMPT---")
+        
+        # Get LLM response
         raw_llm_output = await get_gemini_response_async(llm_prompt)
+        logger.info("✅ Received LLM response:")
+        logger.info("---BEGIN LLM RESPONSE---")
+        logger.info(raw_llm_output)
+        logger.info("---END LLM RESPONSE---")
 
         if raw_llm_output is None:
-            logger.error("LLM returned None for structured scheduling extraction.")
+            logger.error("❌ LLM returned None response")
             return {"status": "failure", "message": "Failed to get a response from the AI for scheduling details."}
 
-        logger.debug(f"Raw LLM output for scheduling: {raw_llm_output}")
-
-        # Robust JSON extraction
+        # Extract and parse JSON
         json_start = raw_llm_output.find('{')
         json_end = raw_llm_output.rfind('}')
         if json_start == -1 or json_end == -1:
-            logger.error("Could not find JSON object in LLM output.")
-            return {"status": "failure", "message": "The AI provided an unparseable response for scheduling. Please try rephrasing."}
+            logger.error("❌ No JSON object found in LLM output")
+            return {"status": "failure", "message": "The AI provided an unparseable response for scheduling."}
+            
         json_string = raw_llm_output[json_start : json_end + 1]
+        logger.info("🔄 Attempting to parse JSON from LLM output:")
+        logger.info(f"Extracted JSON string: {json_string}")
         
         parsed_params_raw = json.loads(json_string)
-        logger.debug(f"Parsed JSON from LLM: {parsed_params_raw}")
+        logger.info("✅ Successfully parsed JSON. Parameters:")
+        logger.info(json.dumps(parsed_params_raw, indent=2))
 
-        # --- Step 1: Basic Structural Validation of LLM Output ---
+        # Validate the parsed parameters        logger.info("🔄 Validating parsed parameters...")
         expected_keys_and_types = {
             "name": str,
             "schedule_type": str,
             "schedule_value": dict,
             "timezone": (str, type(None)),
-            "reminder_content_prompt_id": str,
+            "reminder_content_prompt_id": (str, type(None)),  # Make it optional
             "notes": (str, type(None))
         }
 
         # Check for mandatory keys and their types (allowing None for optional)
         for key, expected_type in expected_keys_and_types.items():
-            value = parsed_params_raw.get(key)
+            value = parsed_params_raw.get(key)            # Skip validation for reminder_content_prompt_id as it's optional
+            if key == "reminder_content_prompt_id":
+                continue
+                
             if value is None and expected_type is not (str, type(None)): # if it's mandatory and None
-                 logger.warning(f"Missing mandatory field from LLM: {key}")
-                 return {"status": "clarification_needed", 
-                         "question": await get_llm_clarification_question(key),
-                         "missing_field": key}
+                logger.warning(f"Missing mandatory field from LLM: {key}")
+                return {"status": "clarification_needed", 
+                        "question": await get_llm_clarification_question(key),
+                        "missing_field": key}
             if value is not None and not isinstance(value, expected_type):
                 logger.warning(f"Invalid type for field '{key}': Expected {expected_type}, got {type(value)}")
                 # For `schedule_value` if it's not a dict, it's a severe error
@@ -533,15 +557,16 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
                     "question": await get_llm_clarification_question("schedule_type"),
                     "missing_field": "schedule_type"}
         
-        schedule_type = ScheduleType(classified_type_str) # Convert to enum
-
-        # Validate reminder_content_prompt_id is a valid ObjectId format
+        schedule_type = ScheduleType(classified_type_str) # Convert to enum        # Handle reminder_content_prompt_id (it's optional)
         prompt_id_str = parsed_params_raw.get("reminder_content_prompt_id")
-        if not prompt_id_str or not ObjectId.is_valid(prompt_id_str):
-            logger.warning(f"Invalid or missing reminder_content_prompt_id: {prompt_id_str}")
-            return {"status": "clarification_needed",
-                    "question": await get_llm_clarification_question("invalid_prompt_id"),
-                    "missing_field": "reminder_content_prompt_id"}
+        if prompt_id_str:
+            if ObjectId.is_valid(prompt_id_str):
+                logger.debug("Valid reminder_content_prompt_id provided")
+            else:
+                logger.warning(f"Invalid reminder_content_prompt_id format: {prompt_id_str}, setting to None")
+                parsed_params_raw["reminder_content_prompt_id"] = None
+        else:
+            logger.debug("No reminder_content_prompt_id provided, continuing with None")
         
         # --- Step 2: Generate RRule Parameters and Calculate Next Run ---
         user_timezone = parsed_params_raw.get("timezone") or "Asia/Kolkata" # Default to user's timezone if not specified
@@ -582,12 +607,12 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
         # Prepare final parameters for Schedule model
         final_params = {
             "name": parsed_params_raw["name"],
-            "schedule_type": schedule_type, # This is the enum value
+            "schedule_type": schedule_type.value, # This is the enum value
             "schedule_value": parsed_params_raw["schedule_value"], # Keep original LLM output for audit/debug
             "rrule_params": rrule_params, # The parsed rrule parameters
             "next_run_at": initial_next_run_at,
             "last_run_at": None, # Initially null
-            "reminder_content_prompt_id": PyObjectId(parsed_params_raw["reminder_content_prompt_id"]),
+            "reminder_content_prompt_id": parsed_params_raw.get("reminder_content_prompt_id"),  # Added this field
             "status": ScheduleStatus.ACTIVE, # Default to active upon creation
             "timezone": user_timezone, # Store the identified timezone
             "notes": parsed_params_raw.get("notes"),
@@ -625,23 +650,27 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
 async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any]:
     """
     Processes a scheduling request and creates a new schedule definition.
-    Handles both raw text scheduling requests and already-parsed parameters.
     """
-    logger.info(f"Processing schedule request for user: {user_id}")
+    logger.info("========= Starting Schedule Request =========")
+    logger.info(f"Received user input: '{user_input}'")
+    logger.info(f"For user_id: {user_id}")
+
     try:
         # Parse the schedule parameters from the user input
+        logger.info("🔄 Parsing schedule parameters...")
         parsing_result = await parse_schedule_parameters_and_clarify(user_input)
+        logger.info(f"Parsing result status: {parsing_result['status']}")
 
         if parsing_result["status"] == "clarification_needed":
-            
-            logger.info(f"Schedule clarification needed: {parsing_result.get('missing_field')}")
+            logger.info(f"⚠️ Clarification needed for field: {parsing_result.get('missing_field')}")
+            logger.info(f"Question to ask user: {parsing_result.get('question', '')}")
             return {
                 "next": "schedule_clarification",
                 "final_outcome": f"I need more information to set up your schedule. {parsing_result.get('question', '')}",
                 "missing_field": parsing_result.get("missing_field")
             }
         elif parsing_result["status"] == "error":
-            logger.error(f"Failed to parse schedule parameters: {parsing_result.get('message')}")
+            logger.error(f"❌ Failed to parse schedule parameters: {parsing_result.get('message')}")
             return {
                 "next": "schedule_failure",
                 "final_outcome": parsing_result["message"]
@@ -649,9 +678,17 @@ async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any
         
         # If status is "success"
         schedule_params = parsing_result["schedule_params"]
+        logger.info("✅ Successfully parsed schedule parameters:")
+        logger.info(f"Name: {schedule_params['name']}")
+        logger.info(f"Type: {schedule_params['schedule_type']}")
+        logger.info(f"Schedule Value: {schedule_params['schedule_value']}")
+        logger.info(f"RRule Params: {schedule_params['rrule_params']}")
+        logger.info(f"Next Run At: {schedule_params['next_run_at']}")
+        logger.info(f"Timezone: {schedule_params['timezone']}")
 
         try:
             # Create a Schedule Pydantic model instance
+            logger.info("Creating Schedule model instance...")
             schedule_definition = Schedule(
                 user_id=user_id,
                 name=schedule_params["name"],
@@ -667,6 +704,7 @@ async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any
             )
 
             # Use the new create_schedule_definition function from mongo.py
+            logger.info("Saving schedule definition to database...")
             schedule_id = await create_schedule_definition(schedule_definition)
 
             if schedule_id:

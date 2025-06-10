@@ -1,21 +1,25 @@
 # main.py
 from pathlib import Path
-import sys
-import logging
-import asyncio
 from typing import Dict, Any
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import sys
+import logging
+from datetime import datetime
 
 # Import the LangGraph State and Graph builder
 from src.agent.state import AgentState
 from src.agent.graph import build_agent_graph
 
 # Import DB client management functions for startup/shutdown
-from src.db.mongo import get_mongo_client, close_mongo_client, DatabaseError
+from src.db.mongo import (
+    get_mongo_client, close_mongo_client, DatabaseError, save_message, get_recent_messages,
+    migrate_messages_to_include_context, prune_old_messages
+)
+from src.models.message import Message
 
 # Add project root to sys.path (points to agent01_attempt)
 project_root = str(Path(__file__).resolve().parent)  # Get the directory containing main.py
@@ -33,17 +37,24 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Context manager for application startup and shutdown events.
-    Handles MongoDB client connection/disconnection and LangGraph setup.
+    Manages the application lifecycle:
+    - Sets up database connections 
+    - Runs necessary migrations
+    - Creates the agent graph
+    - Cleans up on shutdown
     """
-    logger.info("Application startup initiated.")
+    logger.info("🚀 Application startup initiated.")
     try:
         # Connect MongoDB client when the application starts
         mongo_client = await get_mongo_client()
         if mongo_client is None:
-            logger.error("Failed to connect to MongoDB on startup! Shutting down.")
+            logger.error("❌ Failed to connect to MongoDB on startup! Shutting down.")
             raise RuntimeError("Database connection failed")
         logger.info("✅ MongoDB connection established.")
+
+        # Run any necessary database migrations
+        await migrate_messages_to_include_context()
+        logger.info("✅ Database migrations completed.")
 
         # --- LangGraph Setup ---
         logger.info("Building and compiling LangGraph graph...")
@@ -57,48 +68,62 @@ async def lifespan(app: FastAPI):
         yield  # Application runs here
 
     except Exception as e:
-        logger.error(f"Startup error: {e}", exc_info=True)
+        logger.error(f"❌ Application startup failed: {e}")
         raise
     finally:
-        # Cleanup on shutdown
-        logger.info("Application shutdown initiated.")
         try:
+            # Cleanup tasks
             await close_mongo_client()
             logger.info("✅ MongoDB connection closed.")
+            await prune_old_messages()  # Clean up old messages before shutdown
+            logger.info("✅ Old messages pruned.")
         except Exception as e:
-            logger.error(f"Error during MongoDB cleanup: {e}", exc_info=True)
+            logger.error(f"❌ Cleanup error during shutdown: {e}", exc_info=True)
 
-# Create FastAPI application instance, integrating lifespan
+# --- FastAPI Application Configuration ---
 app = FastAPI(
     title="Memory Recall Agent API",
-    description="API for interacting with the Memory Recall Agent.",
+    description="API for interacting with the Memory Recall Agent. Handles chat interactions and scheduling.",
     version="0.1.0",
     lifespan=lifespan
 )
 
-# Define a simple data model for the incoming chat request body
+# Create API router with versioning
+api_router = APIRouter(prefix="/api/v1")
+
+# --- Request/Response Models ---
 class ChatRequest(BaseModel):
     """Request model for chat interactions."""
     user_id: str
     message: str
 
-# Error handler for DatabaseError
+class ChatResponse(BaseModel):
+    """Standardized response model for chat interactions."""
+    success: bool
+    response: str
+    intent: str = "unknown"
+
+# --- Error Handlers ---
 @app.exception_handler(DatabaseError)
 async def database_error_handler(request: Request, exc: DatabaseError):
+    """Handle database-specific errors with a proper 503 response"""
     return JSONResponse(
         status_code=503,
         content={"detail": "Database operation failed. Please try again later."}
     )
 
-# Define an API router
-api_router = APIRouter()
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle any unhandled exceptions with a proper 500 response"""
+    logger.error(f"Unhandled error: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again later."}
+    )
 
-@api_router.get("/", status_code=200)
-async def read_root():
-    """
-    Root endpoint. Returns a simple welcome message.
-    """
-    logger.info("Root endpoint called.")
+@app.get("/", status_code=200)
+async def root():
+    """Root endpoint that returns a welcome message."""
     return {"message": "Welcome to the Memory Recall Agent API!"}
 
 @api_router.get("/health", status_code=200)
@@ -117,33 +142,73 @@ async def health_check():
 
     return {"status": "ok", "database": db_status}
 
-# --- API Routes ---
-@api_router.post("/chat")
+@api_router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
     """
     Main chat endpoint that processes user messages through the agent graph.
+    Messages are saved immediately and pruned as needed for proper context handling.
     """
     logger.info(f"Chat endpoint called with user_id: {request.user_id}")
     try:
-        # Initialize state for the graph
+        # Load recent message history with fixed window
+        recent_messages = await get_recent_messages(request.user_id, limit=7)  # Match DEFAULT_CONTEXT_WINDOW
+        
+        # Create and save user message atomically
+        user_message = Message(
+            content=request.message,
+            role="user",
+            timestamp=datetime.utcnow(),
+            context={"sequence": len(recent_messages)}  # Track message order
+        )
+        
+        try:
+            await save_message(request.user_id, user_message.content, user_message.role, user_message.context)
+            # Trigger pruning after save (keep 100 messages)
+            await prune_old_messages(request.user_id, keep_count=100)
+        except Exception as e:
+            logger.error(f"Failed to save/prune user message: {e}")
+            return {
+                "success": False,
+                "response": "Failed to process message due to storage error",
+                "intent": "error"
+            }
+        
+        # Initialize state with proper context
         initial_state = AgentState(
             user_id=request.user_id,
             user_input=request.message,
             current_config_prompt="",  # Will be loaded in first node
             parsed_intent="",  # Will be set by intent parser
             llm_response="",
-            messages=[],  # Empty message history
-            next_action="start"  # Initial action
+            messages=recent_messages,  # Already proper Message objects
+            next_action="start",  # Initial action
+            context_window=7  # Match DEFAULT_CONTEXT_WINDOW
         )
-        logger.info(f"Initial state created: {initial_state}")
 
-        # Verify MongoDB connection before graph execution
-        client = await get_mongo_client()
-        await client.admin.command('ping')  # Ensure DB is reachable
+        logger.info(f"Initial state created with {len(recent_messages)} previous messages")
 
-        # Execute the agent graph with the initial state (use ainvoke for async)
+        # Execute the agent graph
         final_state = await app.state.agent_graph.ainvoke(initial_state)
         logger.info(f"Agent graph execution completed. Final state: {final_state}")
+        
+        # Save assistant's response atomically
+        if "llm_response" in final_state:
+            assistant_message = Message(
+                content=final_state["llm_response"],
+                role="assistant",
+                timestamp=datetime.utcnow(),
+                context={
+                    "intent": final_state.get("parsed_intent", "unknown"),
+                    "sequence": len(recent_messages) + 1
+                }
+            )
+            try:
+                await save_message(request.user_id, assistant_message.content, assistant_message.role, assistant_message.context)
+                # Trigger pruning after save
+                await prune_old_messages(request.user_id, keep_count=100)
+            except Exception as e:
+                logger.error(f"Failed to save/prune assistant message: {e}")
+                # Continue since we already have the response
         
         response = {
             "success": True,
@@ -153,15 +218,13 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         logger.info(f"Sending response: {response}")
         return response
 
-    except DatabaseError as e:
-        logger.error(f"Database error in chat endpoint: {e}", exc_info=True)
-        raise
     except Exception as e:
-        logger.error(f"Error processing chat request: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="An error occurred while processing your request."
-        )
+        logger.error(f"Unhandled error in chat endpoint: {e}", exc_info=True)
+        return {
+            "success": False,
+            "response": "An internal error occurred",
+            "intent": "error"
+        }
 
-# Include the defined routes in the main application
+# Include router
 app.include_router(api_router, prefix="/api/v1")

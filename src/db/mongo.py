@@ -5,7 +5,7 @@ from bson import ObjectId
 
 # --- New Motor Imports ---
 import motor.motor_asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from pymongo import IndexModel, ASCENDING
 # Re-import PyMongoError types for comprehensive error handling, as Motor extends them
 from pymongo.errors import ConnectionFailure, OperationFailure, PyMongoError, DuplicateKeyError
@@ -13,7 +13,8 @@ from pymongo.errors import ConnectionFailure, OperationFailure, PyMongoError, Du
 from src.config.settings import MONGODB_CONNECTION_STRING, DB_NAME, COLLECTION_NAME
 from src.models.users import User
 from src.models.schedule import Schedule
-
+from src.models.message import Message  # New import for Message model
+from src.db.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,116 @@ async def get_schedule_collection() -> motor.motor_asyncio.AsyncIOMotorCollectio
         raise DatabaseError(f"Unexpected error getting collection 'schedules': {e}") from e
 
 
+# --- Message Collection Management ---
+async def get_messages_collection() -> motor.motor_asyncio.AsyncIOMotorCollection:
+    """Returns the dedicated messages collection for better scaling."""
+    try:
+        db = await get_mongo_db()
+        return db["messages"]  # Dedicated collection for messages
+    except Exception as e:
+        logger.error(f"Error getting messages collection: {e}")
+        raise DatabaseError(f"Error getting messages collection: {e}")
+
+async def ensure_message_indexes():
+    """Creates optimized indexes for message operations."""
+    try:
+        collection = await get_messages_collection()
+        
+        # Compound index for efficient message retrieval
+        await collection.create_index(
+            [
+                ("user_id", ASCENDING),
+                ("timestamp", -1)
+            ],
+            name="user_messages_timestamp"
+        )
+        
+        # TTL index for automatic message pruning after 30 days
+        await collection.create_index(
+            "timestamp",
+            name="message_ttl",
+            expireAfterSeconds=30 * 24 * 60 * 60  # 30 days
+        )
+        
+        logger.info("✅ Message indexes created successfully")
+    except Exception as e:
+        logger.error(f"Error creating message indexes: {e}")
+        raise DatabaseError(f"Failed to create message indexes: {e}")
+
+@with_retry()
+async def save_message(user_id: str, message: Message) -> bool:
+    """
+    Saves a message with atomic operation for concurrent safety.
+    Uses ordered insert to ensure message sequence integrity.
+    """
+    try:
+        collection = await get_messages_collection()
+        
+        # Prepare message document
+        message_doc = {
+            "user_id": user_id,
+            **message.to_dict()
+        }
+        
+        # Use atomic insert for concurrency safety
+        result = await collection.insert_one(message_doc)
+        
+        return bool(result.inserted_id)
+    except PyMongoError as e:
+        logger.error(f"Error saving message: {e}")
+        raise DatabaseError(f"Failed to save message: {e}")
+
+@with_retry()
+async def get_recent_messages(user_id: str, limit: int = 7) -> List[Message]:
+    """
+    Get recent messages with optimized query and projection.
+    Uses index on timestamp for efficient retrieval.
+    """
+    try:
+        collection = await get_messages_collection()
+        
+        cursor = collection.find(
+            {"user_id": user_id},
+            projection={"_id": 0, "user_id": 0}
+        ).sort("timestamp", -1).limit(limit)
+        
+        messages = [Message.from_dict(doc) async for doc in cursor]
+        return list(reversed(messages))  # Return in chronological order
+    except PyMongoError as e:
+        logger.error(f"Error retrieving messages: {e}")
+        raise DatabaseError(f"Failed to retrieve messages: {e}")
+
+@with_retry()
+async def prune_old_messages(user_id: str, max_messages: int = 100) -> bool:
+    """
+    Prune old messages while maintaining atomicity.
+    Uses bulk operation for efficiency.
+    """
+    try:
+        collection = await get_messages_collection()
+        
+        # Get timestamp of the nth newest message
+        cursor = collection.find(
+            {"user_id": user_id},
+            projection={"timestamp": 1}
+        ).sort("timestamp", -1).skip(max_messages).limit(1)
+        
+        nth_message = await cursor.to_list(1)
+        
+        if not nth_message:
+            return True  # Nothing to prune
+            
+        # Delete all messages older than the nth message
+        result = await collection.delete_many({
+            "user_id": user_id,
+            "timestamp": {"$lt": nth_message[0]["timestamp"]}
+        })
+        
+        return bool(result.deleted_count)
+    except PyMongoError as e:
+        logger.error(f"Error pruning messages: {e}")
+        raise DatabaseError(f"Failed to prune messages: {e}")
+
 # --- Core User Data Functions (Refactored for Exception Handling) ---
 async def get_user_by_id(user_id: str) -> Optional[User]:
     """
@@ -199,6 +310,7 @@ async def get_user_by_id(user_id: str) -> Optional[User]:
         raise DatabaseError(f"Unexpected error fetching user document for {user_id}: {e}") from e
 
 
+@with_retry()
 async def get_user_config(user_id: str) -> str | None:
     """
     Fetches the current config prompt for a user from MongoDB.
@@ -234,6 +346,7 @@ async def get_user_config(user_id: str) -> str | None:
         raise DatabaseError(f"Unexpected error fetching user config for {user_id}: {e}") from e
 
 
+@with_retry()
 async def save_user_config(user_id: str, updated_instructions: str) -> bool:
     """
     Saves the updated config prompt for a user to MongoDB using upsert.
@@ -274,6 +387,7 @@ async def save_user_config(user_id: str, updated_instructions: str) -> bool:
 
 # --- New Functions for Schedule Management (Refactored for Exception Handling) ---
 
+@with_retry()
 async def create_schedule_definition(schedule_data: Schedule) -> ObjectId:
     """
     Creates a new schedule definition in the database.
@@ -309,6 +423,7 @@ async def create_schedule_definition(schedule_data: Schedule) -> ObjectId:
         logger.error(f"Unexpected error during creation of schedule definition: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error during creation of schedule definition: {e}") from e
 
+@with_retry()
 async def get_schedule_by_id(schedule_id: str) -> Optional[Schedule]:
     """
     Fetches a single schedule document by its unique MongoDB _id and returns as a Pydantic model.
@@ -374,6 +489,7 @@ async def get_all_active_schedules() -> List[Schedule]:
     return await find_schedules(user_id=None, query_params={"status": "active"}) # Await the call to find_schedules
 
 
+@with_retry()
 async def update_schedule_by_id(schedule_id: str, updates: Dict[str, Any]) -> bool:
     """
     Updates fields of an existing schedule document by its _id.
@@ -406,6 +522,7 @@ async def update_schedule_by_id(schedule_id: str, updates: Dict[str, Any]) -> bo
         logger.error(f"Unexpected error updating schedule by id {schedule_id}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error updating schedule by id {schedule_id}: {e}") from e
 
+@with_retry()
 async def delete_schedule_by_id(schedule_id: str) -> bool:
     """
     Deletes a schedule document by its _id.
@@ -436,6 +553,7 @@ async def delete_schedule_by_id(schedule_id: str) -> bool:
         logger.error(f"Unexpected error deleting schedule by id {schedule_id}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error deleting schedule by id {schedule_id}: {e}") from e
 
+@with_retry()
 async def deactivate_schedule_by_id(schedule_id: str) -> bool:
     """
     Sets the 'status' field of a schedule to 'inactive' by its _id, effectively deactivating it.
@@ -466,5 +584,172 @@ async def deactivate_schedule_by_id(schedule_id: str) -> bool:
     except Exception as e:
         logger.error(f"Unexpected error deactivating schedule by id {schedule_id}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error deactivating schedule by id {schedule_id}: {e}") from e
+
+# --- New Functions for Message History Management ---
+
+@with_retry()
+async def save_message(user_id: str, message_content: str, role: str, context: dict = None) -> bool:
+    """
+    Saves a new message using the dedicated messages collection.
+    Returns True on success, False on operational failure, raises DatabaseError on critical errors.
+    """
+    try:
+        collection = await get_messages_collection()
+        logger.debug(f"Saving message for user_id: {user_id}")
+        
+        # Create new message document
+        new_message = {
+            "user_id": user_id,
+            "content": message_content,
+            "role": role,
+            "timestamp": datetime.now(timezone.utc),
+            "context": context or {}
+        }
+        
+        # Insert the new message
+        result = await collection.insert_one(new_message)
+        
+        if result.acknowledged:
+            logger.debug(f"✅ Message saved for user {user_id}")
+            return True
+        else:
+            logger.error(f"MongoDB write not acknowledged for user {user_id}")
+            raise DatabaseError(f"MongoDB write not acknowledged for user {user_id}")
+
+    except DuplicateKeyError as e:
+        logger.warning(f"Duplicate key error saving message for {user_id}: {e}", exc_info=True)
+        return False
+    except DatabaseError:
+        raise
+    except PyMongoError as e:
+        logger.error(f"PyMongo error saving message for {user_id}: {e}", exc_info=True)
+        raise DatabaseError(f"DB error saving message for {user_id}: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error saving message for {user_id}: {e}", exc_info=True)
+        raise DatabaseError(f"Unexpected error saving message for {user_id}: {e}") from e
+
+@with_retry()
+async def get_recent_messages(user_id: str, limit: Optional[int] = None) -> List[Message]:
+    """
+    Retrieves recent messages for a user, respecting their message limit setting.
+    
+    Args:
+        user_id: The ID of the user
+        limit: Optional override for number of messages to return
+        
+    Returns:
+        List[Message]: List of recent messages with proper context
+    """
+    try:
+        collection = await get_user_collection()
+        
+        # Get user document with messages and limit
+        user = await collection.find_one(
+            {"user_id": user_id},
+            {"config.messages": 1, "config.message_limit": 1}
+        )
+        
+        if not user or "config" not in user:
+            return []
+            
+        messages_data = user["config"].get("messages", [])
+        user_limit = user["config"].get("message_limit", 10)
+        effective_limit = min(limit if limit is not None else user_limit, user_limit)
+        
+        # Get the most recent messages within the limit
+        recent_messages = messages_data[-effective_limit:] if messages_data else []
+        
+        # Convert to Message objects, ensuring context exists
+        return [Message(
+            content=msg["content"],
+            role=msg["role"],
+            timestamp=msg["timestamp"],
+            context=msg.get("context", {})  # Ensure context exists
+        ) for msg in recent_messages]
+        
+    except Exception as e:
+        logger.error(f"Error fetching messages for user {user_id}: {e}", exc_info=True)
+        raise DatabaseError(f"Error fetching messages: {str(e)}") from e
+
+# --- Message Migration Function ---
+async def migrate_messages_to_include_context(user_id: str = None) -> Tuple[int, int]:
+    """
+    Migrates existing messages to include context field.
+    Returns tuple of (processed_count, updated_count).
+    
+    Args:
+        user_id: Optional user_id to migrate specific user's messages. If None, migrates all users.
+    """
+    try:
+        collection = await get_user_collection()
+        query = {"user_id": user_id} if user_id else {}
+        
+        # Find users with messages that need context
+        pipeline = [
+            {"$match": query},
+            {"$unwind": "$config.messages"},
+            {"$match": {"config.messages.context": {"$exists": False}}},
+            {"$group": {"_id": "$_id"}}
+        ]
+        
+        users_to_update = await collection.aggregate(pipeline).to_list(length=None)
+        processed = 0
+        updated = 0
+        
+        for user_doc in users_to_update:
+            # Add context field to messages that don't have it
+            result = await collection.update_many(
+                {"_id": user_doc["_id"], "config.messages.context": {"$exists": False}},
+                {"$set": {"config.messages.$[msg].context": {}}},
+                array_filters=[{"msg.context": {"$exists": False}}]
+            )
+            processed += 1
+            updated += result.modified_count
+            
+        return processed, updated
+            
+    except Exception as e:
+        logger.error(f"Error during message migration: {e}", exc_info=True)
+        raise DatabaseError(f"Error during message migration: {str(e)}") from e
+
+# --- Message Pruning Function ---
+async def prune_old_messages(user_id: str = None) -> int:
+    """
+    Prunes messages exceeding the user's message limit.
+    Returns number of messages pruned.
+    
+    Args:
+        user_id: Optional user_id to prune specific user's messages. If None, prunes all users.
+    """
+    try:
+        collection = await get_user_collection()
+        query = {"user_id": user_id} if user_id else {}
+        
+        total_pruned = 0
+        async for user in collection.find(query):
+            messages = user.get("config", {}).get("messages", [])
+            message_limit = user.get("config", {}).get("message_limit", 10)
+            
+            if len(messages) > message_limit:
+                # Calculate how many messages to remove
+                to_remove = len(messages) - message_limit
+                
+                # Remove oldest messages
+                result = await collection.update_one(
+                    {"_id": user["_id"]},
+                    {"$push": {"config.messages": {
+                        "$each": [],
+                        "$slice": -message_limit  # Keep only the latest messages
+                    }}}
+                )
+                
+                if result.modified_count:
+                    total_pruned += to_remove
+                    
+        return total_pruned
+            
+    except Exception as e:
+        logger.error(f"Error during message pruning: {e}", exc_info=True)
+        raise DatabaseError(f"Error during message pruning: {str(e)}") from e
 
 logger.info("✅ MongoDB schedule management functions refined for robustness.")

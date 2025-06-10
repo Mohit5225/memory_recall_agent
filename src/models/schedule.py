@@ -20,11 +20,12 @@ class ScheduleType(str, Enum):
 # --- Schedule Status Enum ---
 class ScheduleStatus(str, Enum):
     """Defines the possible states of a schedule."""
-    ACTIVE = "active"       # Schedule is enabled and will trigger
-    PAUSED = "paused"       # Schedule is temporarily disabled
+    ACTIVE = "active"       # Schedule is active and will trigger
+    PAUSED = "paused"       # Schedule is temporarily paused
     COMPLETED = "completed" # Schedule has finished its run
+    FAILED = "failed"       # Schedule encountered an error
     CANCELLED = "cancelled" # Schedule was manually cancelled
-    ERROR = "error"         # Schedule encountered an error
+    EXPIRED = "expired"     # Schedule passed its end date without completing
 
 # --- Model for a Stored Schedule Entry ---
 # This defines the structure of a document in MongoDB
@@ -54,11 +55,10 @@ class Schedule(BaseModel):
 
     # Status of the schedule (e.g., "active", "paused", "completed", "cancelled")
     # This is critical for filtering and management
-    status: str = Field(default="active")
-
-    # The ObjectId reference to the full_instruction_prompt used for content generation
+    status: str = Field(default="active")    # The ObjectId reference to the full_instruction_prompt used for content generation
     # This links the schedule to the specific instructions for generating its reminder content
-    reminder_content_prompt_id: PyObjectId = Field(...) # This should be a link to a user's config prompt ID
+    # Made optional since not all reminders need a specific prompt template
+    reminder_content_prompt_id: Optional[PyObjectId] = Field(default=None)
 
     # Store the ID assigned by Celery Beat for this persistent task
     # ESSENTIAL for updating or deleting the Celery task later

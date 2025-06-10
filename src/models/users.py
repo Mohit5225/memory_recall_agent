@@ -1,18 +1,17 @@
 # src/models/user.py
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
-from typing import Optional, Annotated, Dict, Any
+from typing import Optional, Annotated, Dict, Any, List
 from bson import ObjectId
+from datetime import datetime, timezone
+from .message import Message  # Import the new Message model
 
 # --- Custom Pydantic Type for ObjectId Handling ---
-# Necessary for Pydantic v2 compatibility and correct serialization/deserialization
-# of MongoDB's ObjectId.
-# As suggested by the review.
 def validate_objectid(v):
+    """Validate and convert ObjectId for Pydantic"""
     if isinstance(v, ObjectId):
         return v
     if isinstance(v, str) and ObjectId.is_valid(v):
         return ObjectId(v)
-    # Pydantic v2 expects a PydanticCustomError or ValueError
     raise ValueError("Invalid ObjectId")
 
 # Use Annotated for Pydantic v2 validation
@@ -22,23 +21,27 @@ PyObjectId = Annotated[ObjectId, BeforeValidator(validate_objectid)]
 # Provides better structure, type hinting, and validation for config data.
 # As suggested by the review.
 class UserConfig(BaseModel):
+    """Configuration and state for a user, including conversation history."""
     full_instruction_prompt: str = ""
-    # Future config fields could go here:
-    # style: str = "Quick, factual"
-    # length: str = "Max 2-3 sentences"
-    # etc.
+    messages: List[Message] = Field(default_factory=list)  # Message history
+    message_limit: int = Field(default=10)  # Max messages to keep in history
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 # --- Main User Model ---
 # Represents the structure of a user document in MongoDB.
 # Uses the custom PyObjectId and the nested UserConfig model.
 class User(BaseModel):
+    """User model with configuration and message history."""
     # Map MongoDB's _id to a Pydantic field named 'id'
     # Use the custom PyObjectId type for correct handling
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
 
     # Our application-level unique identifier
     # Review suggested renaming (username, email), but user_id is clear for now
-    user_id: str = Field(...)
+    user_id: str = Field(..., description="Unique identifier for the user")
 
     # Embed configuration using the dedicated UserConfig model
     config: UserConfig = Field(default_factory=UserConfig)
