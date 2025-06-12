@@ -239,15 +239,19 @@ async def save_message(user_id: str, message_content: str, role: str, context: d
     try:
         collection = await get_messages_collection()
         
-        message = {
-            "user_id": user_id,
-            "content": message_content,
-            "role": role,
-            "timestamp": datetime.utcnow(),
-            "context": context or {}
-        }
+        # Create complete message object with user_id
+        message_obj = Message(
+            user_id=user_id,  # Include user_id in initial object creation
+            content=message_content,
+            role=role,
+            timestamp=datetime.utcnow(),
+            context=context or {}
+        )
         
-        result = await collection.insert_one(message)
+        # Convert directly to dict - no need to add fields afterwards
+        message_dict = message_obj.to_dict()
+        
+        result = await collection.insert_one(message_dict)
         return bool(result.inserted_id)
         
     except DuplicateKeyError as e:
