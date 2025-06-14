@@ -1,8 +1,7 @@
 # src/core/intent_parser.py
-from  src.llm.gemini import get_gemini_response_async
+from src.llm.gemini import get_gemini_response_async
 import logging
-from typing import Optional
-from src.agent.state import AgentState
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,10 @@ Your task is to categorize the user's request into one of the following predefin
 - acknowledge: The user is simply acknowledging something or saying thanks (e.g., "ok", "got it", "thanks").
 - other: The user's request does not fit clearly into any of the above categories.
 
-Analyze the user's input carefully. If the user is asking what information is needed or what to do next, classify it as "clarification_request".
+Previous conversation context:
+{message_history}
+
+Analyze the user's input carefully, considering the conversation context above. If the user is asking what information is needed or what to do next, classify it as "clarification_request".
 
 Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation.
 
@@ -29,7 +31,7 @@ User Input: {user_input}
 Intent Category:"""
 
 
-async def parse_user_intent(user_input: str, state: Optional[AgentState] = None) -> str:
+async def parse_user_intent(user_input: str, state: Optional[dict] = None, message_history: Optional[str] = None) -> str:
     """
     Uses the LLM to classify the user's input into a predefined intent category.
     If the intent is unclear, engages in iterative clarification with the user.
@@ -37,17 +39,25 @@ async def parse_user_intent(user_input: str, state: Optional[AgentState] = None)
     Args:
         user_input: The raw input string from the user.
         state: The current state of the agent's workflow (optional).
+        message_history: The formatted conversation history for context (optional).
 
     Returns:
         A string representing the classified intent category. Defaults to 'other' on error.
     """
     logger.info(f"Attempting to parse intent for input: '{user_input[:50]}...'")
 
-    llm_prompt = INTENT_PARSING_PROMPT_TEMPLATE.format(user_input=user_input).strip()
-
+    # Use message history for context, fallback to "No previous messages" if not provided
+    context_history = message_history or "No previous messages"
+    
+    llm_prompt = INTENT_PARSING_PROMPT_TEMPLATE.format(
+        user_input=user_input,
+        message_history=context_history
+    ).strip()
+    
     try:
         # Call the LLM via the gemini module
-        intent_raw = await get_gemini_response_async(llm_prompt)
+        intent_raw, context = await get_gemini_response_async(llm_prompt)
+        logger.info(f"LLM context: {context.get('processing_status', 'unknown')}")
 
         if intent_raw is None:
             logger.error("LLM returned None for intent parsing.")
@@ -70,7 +80,7 @@ async def parse_user_intent(user_input: str, state: Optional[AgentState] = None)
         return await handle_unclear_intent(user_input, state)
 
 
-async def handle_unclear_intent(user_input: str, state: Optional[AgentState]) -> str:
+async def handle_unclear_intent(user_input: str, state: Optional[dict]) -> str:
     """
     Handles cases where the intent is unclear by engaging in iterative clarification with the user.
 
@@ -93,7 +103,7 @@ async def handle_unclear_intent(user_input: str, state: Optional[AgentState]) ->
     return "other"  # Default to 'other' if state is not available
 
 
-async def get_user_clarification(state: AgentState) -> str:
+async def get_user_clarification(state: dict) -> str:
     """
     Simulates getting clarification from the user. Replace with actual user interaction logic.
 

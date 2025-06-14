@@ -9,15 +9,17 @@ from contextlib import asynccontextmanager
 import sys
 import logging
 from datetime import datetime
+import asyncio
 
 # Import the LangGraph State and Graph builder
 from src.agent.state import AgentState
-from src.agent.graph import build_agent_graph
+from src.agent.graph import build_agent_graph, save_messages_atomically
+from src.config.constants import DEFAULT_CONTEXT_WINDOW  # Import for consistent context windowing
 
 # Import DB client management functions for startup/shutdown
 from src.db.mongo import (
     get_mongo_client, close_mongo_client, DatabaseError, save_message, get_recent_messages,
-    prune_old_messages
+    prune_old_messages, _mongo_client
 )
 from src.models.message import Message
 
@@ -43,13 +45,20 @@ async def lifespan(app: FastAPI):
     - Cleans up on shutdown
     """
     logger.info("🚀 Application startup initiated.")
+    mongo_client_instance = None  # Initialize to None
     try:
         # Connect MongoDB client when the application starts
-        mongo_client = await get_mongo_client()
-        if mongo_client is None:
-            logger.error("❌ Failed to connect to MongoDB on startup! Shutting down.")
-            raise RuntimeError("Database connection failed")
-        logger.info("✅ MongoDB connection established.")
+        logger.info("Attempting to initialize MongoDB client for the application...")
+        mongo_client_instance = await get_mongo_client() # Store the returned client
+        
+        if mongo_client_instance is None:
+            logger.error("❌ Failed to connect to MongoDB on startup! _mongo_client in db.mongo might be None or connection failed. Shutting down.")
+            # Log the state of the global _mongo_client from the db.mongo module for diagnostics
+            logger.info(f"State of global _mongo_client from src.db.mongo: {_mongo_client}")
+            raise RuntimeError("Database connection failed during startup")
+        
+        logger.info("✅ MongoDB connection established and client instance obtained.")
+        app.state.mongo_client = mongo_client_instance # Store it on app.state if needed elsewhere
 
         # --- LangGraph Setup ---
         logger.info("Building and compiling LangGraph graph...")
@@ -60,18 +69,23 @@ async def lifespan(app: FastAPI):
             logger.error(f"Failed to build LangGraph graph: {e}", exc_info=True)
             raise RuntimeError("Failed to initialize LangGraph") from e
 
+        # The redundant check for _mongo_client is removed as we now rely on mongo_client_instance
+        logger.info("MongoDB client initialization was handled. Proceeding with application run.")
+        
         yield  # Application runs here
 
     except Exception as e:
         logger.error(f"❌ Application startup failed: {e}")
         raise
     finally:
+        logger.info("Application shutdown: Closing MongoDB client...")
         try:
             # Cleanup tasks
-            await close_mongo_client()
+            # Use the stored mongo_client_instance for operations if needed, though close_mongo_client uses the global
+            await close_mongo_client() 
             logger.info("✅ MongoDB connection closed.")
-            await prune_old_messages()  # Clean up old messages before shutdown
-            logger.info("✅ Old messages pruned.")
+            # Removed: await prune_old_messages()  # This was causing an error as it requires user_id
+            # logger.info("✅ Old messages pruned.") # Corresponding log also removed
         except Exception as e:
             logger.error(f"❌ Cleanup error during shutdown: {e}", exc_info=True)
 
@@ -84,7 +98,7 @@ app = FastAPI(
 )
 
 # Create API router with versioning
-api_router = APIRouter(prefix="/api/v1")
+api_router = APIRouter()
 
 # --- Request/Response Models ---
 class ChatRequest(BaseModel):
@@ -110,7 +124,7 @@ async def database_error_handler(request: Request, exc: DatabaseError):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle any unhandled exceptions with a proper 500 response"""
-    logger.error(f"Unhandled error: {exc}")
+    logger.error(f"Unhandled error: {exc}", exc_info=True)  # Added exc_info=True
     return JSONResponse(
         status_code=500,
         content={"detail": "An unexpected error occurred. Please try again later."}
@@ -144,29 +158,17 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
     Messages are saved immediately and pruned as needed for proper context handling.
     """
     logger.info(f"Chat endpoint called with user_id: {request.user_id}")
-    try:
-        # Load recent message history with fixed window
-        recent_messages = await get_recent_messages(request.user_id, limit=7)  # Match DEFAULT_CONTEXT_WINDOW
+    try:        # Load recent message history with fixed window
+        recent_messages = await get_recent_messages(request.user_id, limit=DEFAULT_CONTEXT_WINDOW)  # Use constant
         
-        # Create and save user message atomically
+        # Create user message object
         user_message = Message(
             content=request.message,
             role="user",
+            user_id=request.user_id,
             timestamp=datetime.utcnow(),
             context={"sequence": len(recent_messages)}  # Track message order
         )
-        
-        try:
-            await save_message(request.user_id, user_message.content, user_message.role, user_message.context)
-            # Trigger pruning after save (keep 100 messages)
-            await prune_old_messages(request.user_id, keep_count=100)
-        except Exception as e:
-            logger.error(f"Failed to save/prune user message: {e}")
-            return {
-                "success": False,
-                "response": "Failed to process message due to storage error",
-                "intent": "error"
-            }
         
         # Initialize state with proper context
         initial_state = AgentState(
@@ -174,10 +176,9 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
             user_input=request.message,
             current_config_prompt="",  # Will be loaded in first node
             parsed_intent="",  # Will be set by intent parser
-            llm_response="",
-            messages=recent_messages,  # Already proper Message objects
+            llm_response="",            messages=recent_messages,  # Already proper Message objects
             next_action="start",  # Initial action
-            context_window=7  # Match DEFAULT_CONTEXT_WINDOW
+            context_window=DEFAULT_CONTEXT_WINDOW  # Use constant
         )
 
         logger.info(f"Initial state created with {len(recent_messages)} previous messages")
@@ -185,25 +186,48 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         # Execute the agent graph
         final_state = await app.state.agent_graph.ainvoke(initial_state)
         logger.info(f"Agent graph execution completed. Final state: {final_state}")
-        
-        # Save assistant's response atomically
-        if "llm_response" in final_state:
+          # Create assistant message object if we have a response
+        response_content = final_state.get("final_outcome") or final_state.get("llm_response", "")
+        if response_content and response_content.strip():
             assistant_message = Message(
-                content=final_state["llm_response"],
+                content=response_content,
                 role="assistant",
+                user_id=request.user_id,
                 timestamp=datetime.utcnow(),
                 context={
                     "intent": final_state.get("parsed_intent", "unknown"),
                     "sequence": len(recent_messages) + 1
                 }
             )
+            
+            # Save both messages atomically
+            messages_to_save = [user_message, assistant_message]
+            save_success = await save_messages_atomically(request.user_id, messages_to_save)
+            
+            if not save_success:
+                logger.error("Failed to save messages atomically")
+                return {
+                    "success": False,
+                    "response": "Failed to process message due to storage error",
+                    "intent": "error"
+                }
+                
+            # Prune old messages after successful save
             try:
-                await save_message(request.user_id, assistant_message.content, assistant_message.role, assistant_message.context)
-                # Trigger pruning after save
                 await prune_old_messages(request.user_id, keep_count=100)
             except Exception as e:
-                logger.error(f"Failed to save/prune assistant message: {e}")
-                # Continue since we already have the response
+                logger.warning(f"Failed to prune old messages: {e}")
+                # Continue since messages were saved successfully
+        else:
+            # Just save user message if we have no response
+            save_success = await save_messages_atomically(request.user_id, [user_message])
+            if not save_success:
+                logger.error("Failed to save user message")
+                return {
+                    "success": False,
+                    "response": "Failed to process message due to storage error",
+                    "intent": "error"
+                }
         
         response = {
             "success": True,
@@ -214,10 +238,10 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         return response
 
     except Exception as e:
-        logger.error(f"Unhandled error in chat endpoint: {e}", exc_info=True)
+        logger.error(f"Error processing chat request: {e}", exc_info=True)
         return {
-            "success": False,
-            "response": "An internal error occurred",
+            "success": False, 
+            "response": "Internal server error",
             "intent": "error"
         }
 

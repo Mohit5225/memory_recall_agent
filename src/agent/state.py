@@ -2,14 +2,20 @@
 from typing import TypedDict, Annotated, List
 from typing_extensions import NotRequired
 import operator
-from src.models.message import Message
+from src.models.message import Message, ProcessingStatus
 from datetime import datetime, timezone
 import asyncio
 import logging
 from typing import List
 
-from src.db.mongo import save_message, get_messages, DatabaseError
-from src.agent.graph import DEFAULT_CONTEXT_WINDOW
+from src.db.mongo import (
+    save_message, 
+    get_recent_messages, 
+    DatabaseError, 
+    _mongo_client, 
+    get_messages_collection
+)
+from src.config.constants import DEFAULT_CONTEXT_WINDOW
 
 logger = logging.getLogger(__name__)
 
@@ -31,61 +37,98 @@ class AgentState(TypedDict):
     messages: Annotated[List[Message], operator.add] # Chat history with proper Message objects
     context_window: NotRequired[int] # Number of messages to use for context (defaults in handlers)
 
+    # --- Processing Status Tracking ---
+    processing_status: NotRequired[ProcessingStatus] # Current overall processing status
+    processing_attempts: NotRequired[int] # Number of processing attempts for this interaction
+    error_details: NotRequired[str] # Error details if processing fails
+    started_at: NotRequired[datetime] # When processing started
+    completed_at: NotRequired[datetime] # When processing completed (success or failure)
+
     # --- Workflow Control Fields ---
     # Fields to control the flow of the graph
     next_action: str # What the graph should do next (e.g., "run_tweak_agent", "parse_input")
     final_outcome: NotRequired[str] # Result of the interaction
 
-    # --- Message Handling ---
-    # Fields and methods to manage message caching and context windows
-    _message_cache: List[dict] # Internal cache for storing messages
-    _context_window: int # Current size of the context window
-
-    def __init__(self, user_id: str):
-        self.user_id = user_id
-        self.current_task = None
-        self.last_update = datetime.now(timezone.utc)
-        self._message_cache = []
-        self._context_window = DEFAULT_CONTEXT_WINDOW
-
-    async def load_messages(self) -> None:
-        """Load messages from database into local cache."""
-        try:
-            messages = await get_messages(self.user_id, self._context_window)
-            self._message_cache = messages
-        except DatabaseError as e:
-            logger.error(f"Failed to load messages for user {self.user_id}: {e}")
-            self._message_cache = []
-
     async def add_message(self, content: str, role: str, context: dict = None) -> bool:
         """
-        Add a new message to both database and local cache.
+        Add a new message to both database and local cache atomically.
         Returns True if successful, False otherwise.
         """
         try:
-            # Save to database first
-            success = await save_message(self.user_id, content, role, context)
-            if not success:
-                return False
+            # MongoDB client should be imported here since this is a class method
+            from src.db.mongo import _mongo_client, get_messages_collection
+            
+            collection = await get_messages_collection()
+            success = False
+            
+            # Use transaction for atomic operation
+            async with await _mongo_client.start_session() as session:
+                async with session.start_transaction():
+                    # Save to database first
+                    new_message = {
+                        "content": content,
+                        "role": role,
+                        "user_id": self.user_id,
+                        "timestamp": datetime.now(timezone.utc),
+                        "context": context or {}
+                    }
+                    
+                    result = await collection.insert_one(new_message, session=session)
+                    success = bool(result.inserted_id)
 
-            # Update local cache
-            new_message = {
-                "content": content,
-                "role": role,
-                "timestamp": datetime.now(timezone.utc),
-                "context": context or {}
-            }
-            self._message_cache.append(new_message)
+                    if success:
+                        # Update local cache only if DB write succeeded
+                        self._message_cache.append(new_message)
+                        
+                        # Maintain context window size
+                        if len(self._message_cache) > self._context_window:
+                            self._message_cache = self._message_cache[-self._context_window:]
             
-            # Maintain context window size
-            if len(self._message_cache) > self._context_window:
-                self._message_cache = self._message_cache[-self._context_window:]
-            
-            return True
+            return success
 
         except DatabaseError as e:
             logger.error(f"Failed to add message for user {self.user_id}: {e}")
             return False
+        except Exception as e:
+            logger.error(f"Unexpected error adding message for user {self.user_id}: {e}")
+            return False
+
+    async def load_messages(self) -> None:
+        """Load messages from database into local cache with retries."""
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                messages = await get_recent_messages(self.user_id, self._context_window)
+                async with await _mongo_client.start_session() as session:
+                    async with session.start_transaction():
+                        # Verify message count hasn't changed during load
+                        collection = await get_messages_collection()
+                        current_count = await collection.count_documents(
+                            {"user_id": self.user_id},
+                            session=session
+                        )
+                        if current_count == len(messages):
+                            self._message_cache = messages
+                            return
+                
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                    
+            except DatabaseError as e:
+                logger.error(f"Failed to load messages for user {self.user_id} (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    self._message_cache = []  # Reset on final failure
+            except Exception as e:
+                logger.error(f"Unexpected error loading messages for user {self.user_id} (attempt {attempt + 1}): {e}")
+                if attempt == max_retries - 1:
+                    self._message_cache = []  # Reset on final failure
+        
+        # If we get here, all retries failed
+        logger.error(f"All attempts to load messages failed for user {self.user_id}")
+        self._message_cache = []
 
     def get_context_messages(self, window: int = None) -> List[dict]:
         """Get messages from local cache respecting context window."""

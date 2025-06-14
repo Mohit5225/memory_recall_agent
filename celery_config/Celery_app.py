@@ -1,19 +1,20 @@
 import os
 import sys
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 from celery import Celery
-import logging
 
 # Set up project root dynamically
 project_root = str(Path(__file__).resolve().parents[1])  # Adjust path to find the correct project root
 if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+    sys.path.insert(0, project_root)  # Ensure project root is in path
 
 # Load environment variables
 load_dotenv()
 
 # Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Retrieve broker and backend URLs from environment variables, ensuring flexibility
@@ -25,7 +26,7 @@ celery_app01 = Celery(
     'memory_recall_agent',
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=[]  # Includes tasks from src/task.py dynamically
+    include=['src.task']  # Includes tasks from src/task.py dynamically
 )
 
 # Configure Celery App with standard settings for reliability
@@ -40,5 +41,14 @@ celery_app01.conf.update(
     task_time_limit=300,  # Hard limit on task execution
     task_soft_time_limit=240,  # Soft limit before timeout exception
 )
+
+# Celery Beat Settings
+celery_app01.conf.beat_schedule = {
+    'dispatch-due-reminders-every-30-seconds': {
+        'task': 'src.task.dispatch_due_reminders',  # Task to run
+        'schedule': 30.0,  # Run every 30 seconds
+    },
+}
+celery_app01.conf.timezone = 'UTC'  # Set timezone for scheduled tasks
 
 logger.info("✅ Celery application instance successfully created and configured.")

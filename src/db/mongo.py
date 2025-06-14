@@ -13,9 +13,9 @@ from pymongo.errors import ConnectionFailure, OperationFailure, PyMongoError, Du
 from src.config.settings import MONGODB_CONNECTION_STRING, DB_NAME, COLLECTION_NAME
 from src.models.users import User
 from src.models.schedule import Schedule
-from src.models.message import Message  # New import for Message model
+from src.models.message import Message, ProcessingStatus  # Added ProcessingStatus
 from src.db.retry import with_retry
-from src.agent.graph import DEFAULT_CONTEXT_WINDOW  # Import constant for consistent windowing
+from src.config.constants import DEFAULT_CONTEXT_WINDOW  # Import constant for consistent windowing
 
 logger = logging.getLogger(__name__)
 
@@ -29,47 +29,34 @@ class DatabaseError(Exception):
     pass
 
 # --- Asynchronous Database Client Management ---
-async def get_mongo_client() -> AsyncIOMotorClient:
-    """
-    Establishes and returns an asynchronous MongoDB client connection.
-    Raises DatabaseError on failure.
-    """
+async def get_mongo_client() -> Optional[AsyncIOMotorClient]:
     global _mongo_client
-    if _mongo_client is not None:
+    if _mongo_client is None:
+        logger.info("MongoDB client is None, attempting to initialize...")
         try:
-            # Check if the existing connection is still alive with a quick async command
-            # The 'ping' command is now awaited
+            if not MONGODB_CONNECTION_STRING:
+                logger.error("MONGODB_CONNECTION_STRING is not set. Cannot initialize MongoDB client.")
+                return None
+            logger.info(f"Attempting to connect with MONGODB_CONNECTION_STRING (first 30 chars): {MONGODB_CONNECTION_STRING[:30]}...")
+            _mongo_client = AsyncIOMotorClient(MONGODB_CONNECTION_STRING)
+            logger.info("AsyncIOMotorClient instantiated. Pinging server to verify connection...")
             await _mongo_client.admin.command('ping')
-            return _mongo_client
-        except ConnectionFailure:
-            logger.warning("Existing MongoDB connection is stale or lost. Reconnecting.")
-            _mongo_client = None # Reset client if stale
-
-    if not MONGODB_CONNECTION_STRING or MONGODB_CONNECTION_STRING == "YOUR_MONGODB_CONNECTION_STRING":
-        logger.critical("MongoDB connection string not configured!")
-        raise DatabaseError("MongoDB connection string not configured.")
-
-    try:
-        logger.info("Attempting to establish new asynchronous MongoDB connection...")
-        # Instantiate Motor's async client
-        # serverSelectionTimeoutMS helps detect network issues faster
-        client = AsyncIOMotorClient(MONGODB_CONNECTION_STRING, serverSelectionTimeoutMS=5000)
-        
-        # The ismaster command is cheap and does not require auth, verifies connection
-        # This command is now awaited
-        await client.admin.command('ismaster') 
-        _mongo_client = client # Store client globally if successful
-        logger.info("✅ New asynchronous MongoDB connection established.")
-        return _mongo_client
-    except ConnectionFailure as e:
-        logger.critical(f"MongoDB connection failed: {e}", exc_info=True)
-        _mongo_client = None
-        raise DatabaseError(f"MongoDB connection failed: {e}") from e
-    except Exception as e:
-        logger.critical(f"An unexpected error occurred during MongoDB connection: {e}", exc_info=True)
-        _mongo_client = None
-        raise DatabaseError(f"An unexpected error occurred during MongoDB connection: {e}") from e
-
+            logger.info("MongoDB client initialized and connection verified (ping successful).")
+        except ConnectionFailure as e:
+            logger.error(f"MongoDB connection failed (ConnectionFailure) during initialization: {e}")
+            _mongo_client = None 
+            return None
+        except PyMongoError as e: # Catch broader PyMongo errors like auth errors etc.
+            logger.error(f"A PyMongoError occurred during MongoDB client initialization: {e.__class__.__name__}: {e}")
+            _mongo_client = None
+            return None
+        except Exception as e: 
+            logger.error(f"An unexpected error occurred during MongoDB client initialization: {e.__class__.__name__}: {e}")
+            _mongo_client = None
+            return None
+    else:
+        logger.info("MongoDB client already initialized, returning existing instance.")
+    return _mongo_client
 
 async def close_mongo_client():
     """Closes the global MongoDB client connection asynchronously."""
@@ -173,6 +160,49 @@ async def get_schedule_collection() -> motor.motor_asyncio.AsyncIOMotorCollectio
         raise DatabaseError(f"Unexpected error getting collection 'schedules': {e}") from e
 
 
+async def find_schedules_for_dispatch(now_utc: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    """
+    Finds active schedules that are due for dispatch.
+    A schedule is due if its status is ACTIVE and next_run_at is less than or equal to the current UTC time.
+    Args:
+        now_utc: The current UTC datetime. If None, datetime.now(timezone.utc) is used.
+    Returns:
+        A list of schedule documents (as dicts) that are due.
+    Raises:
+        DatabaseError: If there's an issue accessing the database.
+    """
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    
+    logger.info(f"Finding schedules for dispatch, due at or before: {now_utc.isoformat()}")
+    
+    try:
+        schedules_collection = await get_schedule_collection()
+        query = {
+            "status": ScheduleStatus.ACTIVE.value, # Ensure we use the enum's value
+            "next_run_at": {"$lte": now_utc}
+        }
+        
+        # Log the query being made
+        logger.debug(f"Dispatch query: {query}")
+
+        cursor = schedules_collection.find(query)
+        due_schedules = await cursor.to_list(length=None) # Get all matching documents
+        
+        logger.info(f"Found {len(due_schedules)} schedules due for dispatch.")
+        # Convert ObjectId to str for easier serialization if needed later (e.g., by Celery)
+        for schedule in due_schedules:
+            if "_id" in schedule and isinstance(schedule["_id"], ObjectId):
+                schedule["_id"] = str(schedule["_id"])
+        
+        return due_schedules
+    except PyMongoError as e:
+        logger.error(f"PyMongoError while finding schedules for dispatch: {e}", exc_info=True)
+        raise DatabaseError(f"Database operation failed while finding schedules: {e}") from e
+    except Exception as e:
+        logger.error(f"Unexpected error while finding schedules for dispatch: {e}", exc_info=True)
+        raise DatabaseError(f"An unexpected error occurred while finding schedules: {e}") from e
+
 # --- Message Collection Management ---
 async def get_messages_collection() -> AsyncIOMotorCollection:
     """Get a reference to the dedicated messages collection and ensure indexes exist."""
@@ -233,25 +263,30 @@ async def ensure_message_indexes():
 @with_retry()
 async def save_message(user_id: str, message_content: str, role: str, context: dict = None) -> bool:
     """
-    Saves a new message using the dedicated messages collection.
+    Saves a new message using the dedicated messages collection with transaction support.
     Returns True on success, False on operational failure, raises DatabaseError on critical errors.
     """
     try:
+        await get_mongo_client()  # Ensures _mongo_client is initialized
         collection = await get_messages_collection()
         
-        # Create complete message object with user_id
+        # Create complete message object with user_id and processing status
         message_obj = Message(
-            user_id=user_id,  # Include user_id in initial object creation
+            user_id=user_id,
             content=message_content,
             role=role,
             timestamp=datetime.utcnow(),
-            context=context or {}
+            context=context or {},
+            processing_status=ProcessingStatus.PENDING
         )
         
-        # Convert directly to dict - no need to add fields afterwards
-        message_dict = message_obj.to_dict()
+        # Convert to dict
+        message_dict = message_obj.model_dump()
         
-        result = await collection.insert_one(message_dict)
+        # Use a session for atomicity
+        async with await _mongo_client.start_session() as session:
+            async with session.start_transaction():
+                result = await collection.insert_one(message_dict, session=session)
         return bool(result.inserted_id)
         
     except DuplicateKeyError as e:
@@ -277,10 +312,23 @@ async def get_recent_messages(user_id: str, limit: int = DEFAULT_CONTEXT_WINDOW)
         
         cursor = collection.find(
             {"user_id": user_id},
-            projection={"_id": 0, "user_id": 0}
+            projection={"_id": 0}  # MODIFIED: Removed "user_id": 0 to ensure it's included
         ).sort("timestamp", -1).limit(limit)
         
-        messages = [Message.from_dict(doc) async for doc in cursor]
+        # messages = [Message.from_dict(doc) async for doc in cursor] # Old line for context
+        # Corrected line to ensure user_id is passed if it was missing due to projection
+        messages_data = await cursor.to_list(length=limit)
+        messages = []
+        for doc in messages_data:
+            # Ensure user_id from the query filter is used if somehow still missing in doc,
+            # though the projection change should be the primary fix.
+            # This is more of a safeguard or for contexts where doc might not have it.
+            # However, for this specific error, the projection was the culprit.
+            # The Message.from_dict will now receive user_id from the doc.
+            if 'user_id' not in doc and user_id: # This check is now less critical with projection fix
+                 doc['user_id'] = user_id # Should not be needed if projection is correct
+            messages.append(Message.from_dict(doc))
+
         return list(reversed(messages))  # Return in chronological order
     except PyMongoError as e:
         logger.error(f"Error retrieving messages: {e}")
@@ -289,8 +337,8 @@ async def get_recent_messages(user_id: str, limit: int = DEFAULT_CONTEXT_WINDOW)
 @with_retry()
 async def prune_old_messages(user_id: str, keep_count: int = 100) -> bool:
     """
-    Prune old messages while maintaining atomicity.
-    Uses bulk operation for efficiency.
+    Prune old messages while maintaining atomicity using a session.
+    Uses a transaction to ensure consistency.
 
     Args:
         user_id: ID of the user whose messages should be pruned
@@ -300,26 +348,41 @@ async def prune_old_messages(user_id: str, keep_count: int = 100) -> bool:
         bool: True if pruning was successful or no pruning was needed, False otherwise
     """
     try:
+        db = await get_mongo_db()
         collection = await get_messages_collection()
         
-        # Get timestamp of the nth newest message
-        cursor = collection.find(
-            {"user_id": user_id},
-            projection={"timestamp": 1}
-        ).sort("timestamp", -1).skip(keep_count).limit(1)
-        
-        nth_message = await cursor.to_list(1)
-        
-        if not nth_message:
-            return True  # Nothing to prune
-            
-        # Delete all messages older than the nth message
-        result = await collection.delete_many({
-            "user_id": user_id,
-            "timestamp": {"$lt": nth_message[0]["timestamp"]}
-        })
-        
-        return bool(result.deleted_count)
+        async with await _mongo_client.start_session() as session:
+            async with session.start_transaction():
+                # Get total count and verify if pruning is needed
+                total_count = await collection.count_documents({"user_id": user_id}, session=session)
+                if total_count <= keep_count:
+                    return True  # Nothing to prune
+                
+                # Find the timestamp cutoff in a single aggregation
+                pipeline = [
+                    {"$match": {"user_id": user_id}},
+                    {"$sort": {"timestamp": -1}},
+                    {"$skip": keep_count - 1},  # -1 to get the last message we want to keep
+                    {"$limit": 1},
+                    {"$project": {"timestamp": 1}}
+                ]
+                
+                cursor = collection.aggregate(pipeline, session=session)
+                cutoff_doc = await cursor.to_list(1)
+                
+                if not cutoff_doc:
+                    return True  # Something went wrong, but we'll return True to be safe
+                  # Delete all messages older than the cutoff timestamp
+                result = await collection.delete_many(
+                    {
+                        "user_id": user_id,
+                        "timestamp": {"$lt": cutoff_doc[0]["timestamp"]}
+                    },
+                    session=session
+                )
+                
+                # Transaction will automatically commit if we reach here
+                return bool(result.deleted_count)
     except PyMongoError as e:
         logger.error(f"Error pruning messages: {e}")
         raise DatabaseError(f"Failed to prune messages: {e}")
@@ -626,5 +689,54 @@ async def deactivate_schedule_by_id(schedule_id: str) -> bool:
     except Exception as e:
         logger.error(f"Unexpected error deactivating schedule by id {schedule_id}: {e}", exc_info=True)
         raise DatabaseError(f"Unexpected error deactivating schedule by id {schedule_id}: {e}") from e
+
+@with_retry()
+async def update_message_status(
+    user_id: str, 
+    message_id: str, 
+    new_status: ProcessingStatus,
+    error_details: str = None
+) -> bool:
+    """
+    Updates the processing status of a message with transaction support.
+    Returns True if successful, False if message not found, raises DatabaseError on critical errors.
+    """
+    try:
+        collection = await get_messages_collection()
+        
+        async with await _mongo_client.start_session() as session:
+            async with session.start_transaction():
+                update_data = {
+                    "$set": {
+                        "processing_status": new_status,
+                        "processing_attempts": {"$add": ["$processing_attempts", 1]},
+                        "last_attempt": datetime.utcnow()
+                    }
+                }
+                
+                if error_details is not None:
+                    update_data["$set"]["error_details"] = error_details
+
+                result = await collection.update_one(
+                    {
+                        "user_id": user_id,
+                        "_id": ObjectId(message_id)
+                    },
+                    update_data,
+                    session=session
+                )
+                
+                if not result.acknowledged:
+                    logger.error("MongoDB write not acknowledged for message status update")
+                    raise DatabaseError("MongoDB write not acknowledged")
+                    
+                return result.modified_count > 0
+
+    except PyMongoError as e:
+        logger.error(f"Error updating message status: {e}")
+        raise DatabaseError(f"Failed to update message status: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error in update_message_status: {e}")
+        raise DatabaseError(f"Unexpected error in update_message_status: {e}")
 
 logger.info("✅ MongoDB database functions refined for robustness.")

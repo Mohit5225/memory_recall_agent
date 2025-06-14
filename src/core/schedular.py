@@ -491,16 +491,35 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
         logger.info("---BEGIN PROMPT---")
         logger.info(llm_prompt)
         logger.info("---END PROMPT---")
-        
-        # Get LLM response
-        raw_llm_output = await get_gemini_response_async(llm_prompt)
+          # Get LLM response
+        raw_llm_output, context = await get_gemini_response_async(llm_prompt)
+        logger.info(f"LLM context info: {context}")
         logger.info("✅ Received LLM response:")
         logger.info("---BEGIN LLM RESPONSE---")
         logger.info(raw_llm_output)
         logger.info("---END LLM RESPONSE---")
 
         if raw_llm_output is None:
-            logger.error("❌ LLM returned None response")
+            # Enhanced error handling using context information
+            error_type = context.get("error_type", "unknown")
+            error_details = context.get("error_details", "No details available")
+            processing_attempts = context.get("processing_attempts", 0)
+            
+            # Context-aware error messages for schedule parsing
+            if error_type == "api_key_invalid":
+                logger.error(f"❌ LLM API key configuration error for schedule parsing. Cannot proceed.")
+            elif error_type == "quota_exceeded":
+                logger.error(f"❌ LLM API quota exceeded for schedule parsing after {processing_attempts} attempts.")
+            elif error_type == "rate_limit":
+                logger.error(f"❌ LLM API rate limit hit for schedule parsing after {processing_attempts} attempts.")
+            elif error_type == "max_retries":
+                logger.error(f"❌ LLM failed after {processing_attempts} retry attempts for schedule parsing. Error: {error_details}")
+            else:
+                logger.error(f"❌ LLM returned None response for schedule parsing. Error type: {error_type}, Details: {error_details}")
+            
+            # Enhanced context logging for debugging
+            logger.info(f"Schedule parsing LLM failure context - Type: {error_type}, Attempts: {processing_attempts}, Status: {context.get('processing_status', 'unknown')}")
+            
             return {"status": "failure", "message": "Failed to get a response from the AI for scheduling details."}
 
         # Extract and parse JSON
@@ -635,11 +654,23 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
     Uses an LLM call to generate a natural language clarification question based on a key.
     """
     prompt = CLARIFICATION_PROMPT_TEMPLATE.format(missing_detail_key=missing_detail_key).strip()
+    
     try:
-        response = await get_gemini_response_async(prompt)
+        response, context = await get_gemini_response_async(prompt)
+        logger.info(f"Clarification LLM context info: {context}")
+        
         if response:
             return response.strip()
-        logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Falling back to generic.")
+        
+        # Enhanced error handling for clarification generation
+        error_type = context.get("error_type", "unknown")
+        processing_attempts = context.get("processing_attempts", 0)
+        
+        if error_type in ["api_key_invalid", "quota_exceeded", "rate_limit"]:
+            logger.warning(f"LLM {error_type} for clarification key: {missing_detail_key} after {processing_attempts} attempts. Falling back to generic.")
+        else:
+            logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Error: {error_type}. Falling back to generic.")
+        
         return "Could you please provide more details to help me schedule this reminder?"
     except Exception as e:
         logger.error(f"Error generating LLM clarification question for '{missing_detail_key}': {e}", exc_info=True)

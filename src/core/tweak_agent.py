@@ -81,8 +81,7 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
 
         if not existing_instructions.strip():  # Check if fetched config is empty or just whitespace
             logging.info(f"No existing config found for {user_id} in DB. Using default instructions.")
-            current_instructions = DEFAULT_INSTRUCTIONS.strip()  # Use and strip default
-        else:
+            current_instructions = DEFAULT_INSTRUCTIONS.strip()  # Use and strip default        else:
             logging.info(f"Using existing config for {user_id} from DB.")
             current_instructions = existing_instructions.strip()  # Use and strip fetched
 
@@ -93,33 +92,81 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
         ).strip()  # Strip prompt whitespace
 
         logging.info("Constructed LLM prompt for tweaking.")
-
-        # 3. Call the LLM API to get the revised instructions
+          # 3. Call the LLM API to get the revised instructions
         logging.info("Calling LLM to revise instructions...")
-        revised_instructions = await get_gemini_response_async(llm_prompt)
+        revised_instructions, context = await get_gemini_response_async(llm_prompt)
+        logging.info(f"LLM context info: {context}")
 
         if revised_instructions is None:
-            logging.error("Failed to get a valid response from LLM to revise instructions.")
+            # Enhanced error handling using context information
+            error_type = context.get("error_type", "unknown")
+            error_details = context.get("error_details", "No details available")
+            processing_attempts = context.get("processing_attempts", 0)
+            
+            # Context-aware error messages
+            if error_type == "api_key_invalid":
+                logging.error(f"LLM API key configuration error for user {user_id}. Cannot proceed with config update.")
+            elif error_type == "quota_exceeded":
+                logging.error(f"LLM API quota exceeded for user {user_id}. Consider retry later or use fallback.")
+            elif error_type == "rate_limit":
+                logging.error(f"LLM API rate limit hit for user {user_id} after {processing_attempts} attempts.")
+            elif error_type == "max_retries":
+                logging.error(f"LLM failed after {processing_attempts} retry attempts for user {user_id}. Error: {error_details}")
+            else:
+                logging.error(f"Failed to get valid LLM response for user {user_id}. Error type: {error_type}, Details: {error_details}")
+            
+            # Enhanced context logging for debugging
+            logging.info(f"LLM failure context - Type: {error_type}, Attempts: {processing_attempts}, Status: {context.get('processing_status', 'unknown')}")
+            
             return False  # Indicate failure
 
         # Ensure the LLM returned text and strip potential surrounding quotes/whitespace
-        revised_instructions = revised_instructions.strip().strip('`').strip()  # Basic cleaning
-
-        # 4. Save the revised instructions back to the DB
+        revised_instructions = revised_instructions.strip().strip('`').strip()  # Basic cleaning        # 4. Save the revised instructions back to the DB
         logging.info("Saving revised instructions to DB...")
         save_success = await save_user_config(user_id, revised_instructions)
 
         if save_success:
             logging.info(f"✅ User {user_id} config update process completed.")
+            
+            # Enhanced success logging with context information
+            if context:
+                processing_status = context.get("processing_status", "unknown")
+                processing_attempts = context.get("processing_attempts", 0)
+                logging.info(f"LLM processing successful - Status: {processing_status}, Attempts: {processing_attempts}")
+            
             logging.info("Preview of updated config (first 5 non-empty lines):")
             lines = revised_instructions.split('\n')
             non_empty_lines = [line for line in lines if line.strip()]
             logging.info('\n'.join(non_empty_lines[:5]))
-            return True  # Indicate success
-        else:
+            return True  # Indicate successelse:
+            # Enhanced database save error handling
             logging.error(f"Failed to save revised config for user {user_id}.")
+            
+            # Additional context-aware logging for database failures
+            if context:
+                processing_status = context.get("processing_status", "unknown")
+                if processing_status == "completed":
+                    logging.warning(f"LLM processing completed successfully but database save failed for user {user_id}")
+                logging.info(f"LLM processing context at DB save failure - Status: {processing_status}, Attempts: {context.get('processing_attempts', 0)}")
+            
             return False  # Indicate failure
 
     except Exception as e:
+        # Enhanced general exception handling with context information
         logging.error(f"Error processing instruction for user {user_id}: {e}", exc_info=True)
+        
+        # Log context information if available for debugging
+        try:
+            if 'context' in locals() and context:
+                error_context = {
+                    "processing_status": context.get("processing_status", "unknown"),
+                    "processing_attempts": context.get("processing_attempts", 0),
+                    "error_type": context.get("error_type", "unknown"),
+                    "last_attempt": context.get("last_attempt", "unknown")
+                }
+                logging.info(f"Exception occurred with LLM context: {error_context}")
+        except Exception as ctx_error:
+            # Prevent context logging from causing additional failures
+            logging.debug(f"Could not log context information: {ctx_error}")
+        
         return False  # Indicate failure

@@ -13,6 +13,15 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
     """
     Get response from Gemini with proper error handling and status tracking.
     Returns both the response and updated context with processing status.
+    
+    Args:
+        prompt: The text prompt to send to Gemini
+        message_context: Optional dictionary containing context about the message
+        max_retries: Maximum number of retry attempts for recoverable errors
+        
+    Returns:
+        Tuple of (response_text, context_dict) where response_text may be None on error
+        and context_dict contains processing status and error details
     """
     if not GOOGLE_API_KEY or "YOUR_KEY" in GOOGLE_API_KEY:
         logging.error("Invalid API key configuration")
@@ -26,8 +35,9 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
     
     for attempt in range(max_retries):
         try:
-            if attempt > 0:  # Add exponential backoff delay for retries
+            if attempt > 0:
                 delay = min(2 ** attempt, 32)  # Cap at 32 seconds
+                logging.info(f"Retrying after {delay}s delay (attempt {attempt + 1}/{max_retries})")
                 await asyncio.sleep(delay)
             
             logging.info(f"Sending prompt to Gemini (attempt {attempt + 1}/{max_retries}): {prompt[:100]}...")
@@ -40,31 +50,85 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
             )
             
             if not hasattr(response, 'text'):
-                if attempt == max_retries - 1:  # Only fail on last attempt
+                error_msg = "Response missing text attribute"
+                logging.warning(f"{error_msg} on attempt {attempt + 1}")
+                if attempt == max_retries - 1:
                     context["processing_status"] = "failed"
-                    context["error_details"] = "Response missing text attribute"
+                    context["error_details"] = error_msg
+                    context["error_type"] = "invalid_response"
                     return None, context
-                continue  # Try again if we have attempts left
+                continue
             
             # Success case
             context["processing_status"] = "completed"
             context["error_details"] = None
+            context["error_type"] = None
             return response.text, context
 
-        except exceptions.ResourceExhausted:
+        except exceptions.InvalidArgument as e:
+            error_msg = f"Invalid argument: {str(e)}"
+            logging.error(error_msg)
+            context["processing_status"] = "failed"
+            context["error_details"] = error_msg
+            context["error_type"] = "invalid_argument"
+            return None, context  # Don't retry on invalid arguments
+
+        except exceptions.ResourceExhausted as e:
+            error_msg = f"Resource quota exceeded: {str(e)}"
+            logging.warning(f"{error_msg} on attempt {attempt + 1}")
             if attempt == max_retries - 1:
                 context["processing_status"] = "failed"
-                context["error_details"] = "Resource exhausted"
+                context["error_details"] = error_msg
+                context["error_type"] = "resource_exhausted"
                 return None, context
-            # Will retry automatically due to the loop
+            continue  # Will retry with backoff
+
+        except exceptions.DeadlineExceeded as e:
+            error_msg = f"Request deadline exceeded: {str(e)}"
+            logging.warning(f"{error_msg} on attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                context["processing_status"] = "failed"
+                context["error_details"] = error_msg
+                context["error_type"] = "deadline_exceeded"
+                return None, context
+            continue  # Will retry with backoff
+
+        except exceptions.ServiceUnavailable as e:
+            error_msg = f"Service unavailable: {str(e)}"
+            logging.warning(f"{error_msg} on attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                context["processing_status"] = "failed"
+                context["error_details"] = error_msg
+                context["error_type"] = "service_unavailable"
+                return None, context
+            continue  # Will retry with backoff
 
         except Exception as e:
-            logging.error(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
+            error_msg = f"Unexpected error: {str(e)}"
+            logging.error(f"{error_msg} on attempt {attempt + 1}")
             context["processing_status"] = "failed"
-            context["error_details"] = f"Unexpected error: {str(e)}"
+            context["error_details"] = error_msg
+            context["error_type"] = "unexpected"
             return None, context  # Don't retry on unknown errors
 
     # Should never reach here due to returns in the loop
     context["processing_status"] = "failed"
     context["error_details"] = "Maximum retries exceeded"
+    context["error_type"] = "max_retries"
     return None, context
+
+
+# --- Simple Wrapper for Backward Compatibility ---
+async def get_gemini_text_async(prompt: str, max_retries: int = 3) -> Optional[str]:
+    """
+    Simple wrapper that returns only the text response for backward compatibility.
+    
+    Args:
+        prompt: The text prompt to send to Gemini
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Optional[str]: Just the response text, or None if failed
+    """
+    response_text, context = await get_gemini_response_async(prompt, None, max_retries)
+    return response_text
