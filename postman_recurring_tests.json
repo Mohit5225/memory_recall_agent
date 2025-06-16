@@ -1,0 +1,192 @@
+{
+    "info": {
+        "name": "Recurring Reminder Validation Tests",
+        "description": "Test collection to validate the recurring reminder fix",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "1. Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/health",
+                    "host": ["{{base_url}}"],
+                    "path": ["api", "health"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Health check returns 200', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "2. Create Daily Recurring Schedule",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"user_id\": \"test_user_daily\",\n    \"message\": \"Set up a daily reminder at 9 AM to review my goals\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/chat",
+                    "host": ["{{base_url}}"],
+                    "path": ["api", "chat"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Daily schedule creation succeeds', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response contains schedule confirmation', function () {",
+                            "    const response = pm.response.json();",
+                            "    pm.expect(response.response).to.include('daily');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "3. Create Weekly Recurring Schedule", 
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"user_id\": \"test_user_weekly\",\n    \"message\": \"Schedule a weekly reminder every Monday at 10 AM for team meeting prep\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/chat",
+                    "host": ["{{base_url}}"],
+                    "path": ["api", "chat"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Weekly schedule creation succeeds', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response contains weekly schedule confirmation', function () {",
+                            "    const response = pm.response.json();",
+                            "    pm.expect(response.response).to.include('weekly');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "4. Create Monthly Recurring Schedule",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"user_id\": \"test_user_monthly\",\n    \"message\": \"Set up a monthly reminder on the 15th at 2 PM to review expenses\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/chat",
+                    "host": ["{{base_url}}"],
+                    "path": ["api", "chat"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('Monthly schedule creation succeeds', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response contains monthly schedule confirmation', function () {",
+                            "    const response = pm.response.json();",
+                            "    pm.expect(response.response).to.include('monthly');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "name": "5. Create One-Time Schedule (Control Test)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"user_id\": \"test_user_once\",\n    \"message\": \"Remind me tomorrow at 3 PM to call John\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/chat",
+                    "host": ["{{base_url}}"],
+                    "path": ["api", "chat"]
+                }
+            },
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "pm.test('One-time schedule creation succeeds', function () {",
+                            "    pm.response.to.have.status(200);",
+                            "});",
+                            "",
+                            "pm.test('Response contains one-time schedule confirmation', function () {",
+                            "    const response = pm.response.json();",
+                            "    pm.expect(response.response).to.include('remind');",
+                            "});"
+                        ]
+                    }
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        }
+    ]
+}

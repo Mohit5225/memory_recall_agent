@@ -228,10 +228,16 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
                     "response": "Failed to process message due to storage error",
                     "intent": "error"
                 }
+          # Check if the response indicates an error
+        response_content = final_state.get("final_outcome", "No response generated.")
+        is_error = any(error_phrase in response_content.lower() for error_phrase in [
+            "error", "failed", "unexpected error", "internal system error", 
+            "database error", "internal database issue"
+        ])
         
         response = {
-            "success": True,
-            "response": final_state.get("final_outcome", "No response generated."),
+            "success": not is_error,
+            "response": response_content,
             "intent": final_state.get("parsed_intent", "unknown")
         }
         logger.info(f"Sending response: {response}")

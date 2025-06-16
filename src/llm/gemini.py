@@ -116,19 +116,3 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
     context["error_details"] = "Maximum retries exceeded"
     context["error_type"] = "max_retries"
     return None, context
-
-
-# --- Simple Wrapper for Backward Compatibility ---
-async def get_gemini_text_async(prompt: str, max_retries: int = 3) -> Optional[str]:
-    """
-    Simple wrapper that returns only the text response for backward compatibility.
-    
-    Args:
-        prompt: The text prompt to send to Gemini
-        max_retries: Maximum number of retry attempts
-        
-    Returns:
-        Optional[str]: Just the response text, or None if failed
-    """
-    response_text, context = await get_gemini_response_async(prompt, None, max_retries)
-    return response_text

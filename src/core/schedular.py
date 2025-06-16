@@ -23,70 +23,122 @@ class ScheduleClarificationNeeded(Exception):
         self.missing_field = missing_field
         self.clarification_prompt_key = clarification_prompt_key or missing_field # Key for specific LLM prompt
 
-# --- LLM Prompt for Structured Scheduling Parameter Extraction ---
+# --- LLM Prompt for Unified Scheduling and Config Extraction ---
 SCHEDULING_EXTRACTION_PROMPT_TEMPLATE = """
-You are a scheduling parameter extraction system for a reminder agent.
-Your task is to analyze the user's request to schedule reminders and extract the following details.
+You are a unified extraction system for a reminder agent that handles both scheduling and user configuration.
+Your task is to analyze the user's request and extract scheduling details AND any user configuration preferences.
 Format the extracted information as a JSON object.
 
 Expected JSON Schema:
 {{
-  "name": "string (a concise, human-readable name for the reminder, e.g., 'Daily AI Update', 'Tuesday Meeting Reminder')",
-  "schedule_type": "string (one of: daily, weekly, monthly, once, interval, none_other - based on frequency or specific dates)",
-  "schedule_value": "object (details for the schedule_type, e.g., {{"time": "10:00"}} for daily, {{"day_of_week": "Monday", "time": "09:00"}} for weekly, {{"date": "2025-12-31", "time": "14:00"}} for once, {{"interval": 2, "unit": "days"}} for interval. Empty object if not specified)",
-  "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - infer from context or default to 'Asia/Kolkata' if unsure, use IANA format)",
-  "reminder_content_prompt_id": "string (Optional - The MongoDB ObjectId as a string for a predefined reminder template, or null if using direct message)",
-  "notes": "string (any other relevant scheduling details or constraints, or null if none - e.g., 'weekends only', 'every other day')"
+  "schedule": {{
+    "name": "string (a concise, human-readable name for the reminder, e.g., 'Daily AI Update', 'Tuesday Meeting Reminder')",
+    "schedule_type": "string (one of: daily, weekly, monthly, once, interval, none_other - based on frequency or specific dates)",
+    "schedule_value": "object (details for the schedule_type, e.g., {{"time": "10:00"}} for daily, {{"day_of_week": "Monday", "time": "09:00"}} for weekly, {{"date": "2025-12-31", "time": "14:00"}} for once, {{"interval": 2, "unit": "days"}} for interval. Empty object if not specified)",
+    "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - infer from context or default to 'Asia/Kolkata' if unsure, use IANA format)",
+    "reminder_content_prompt_id": "string (Optional - The MongoDB ObjectId as a string for a predefined reminder template, or null if using direct message)",
+    "notes": "string (any other relevant scheduling details or constraints, or null if none - e.g., 'weekends only', 'every other day')"
+  }},
+  "user_config_updates": {{
+    "has_config_preferences": "boolean (true if user mentioned preferences about reminder style, tone, topics, format, etc.; false if only scheduling)",
+    "topic_preferences": "string (the main topic/subject area for reminders, e.g., 'Python programming', 'Machine Learning', 'Health tips', or null if not specified)",
+    "style_preferences": "string (preferred style/format, e.g., 'brief bullet points', 'detailed explanations', 'code examples', or null if not specified)",
+    "tone_preferences": "string (preferred tone, e.g., 'professional', 'casual', 'witty', 'motivational', or null if not specified)",
+    "length_preferences": "string (preferred length, e.g., 'short', 'medium', 'detailed', '2-3 sentences', or null if not specified)",
+    "additional_instructions": "string (any other specific instructions about how reminders should be generated, or null if none)"
+  }}
 }}
 
-If a detail is not specified or is unclear, use 'null' for string/object fields, or infer sensible defaults.
-Infer timezone from user input if possible, otherwise default to 'Asia/Kolkata'.
-Ensure the schedule_type is one of the specified categories.
-The 'schedule_value' object should contain the specific details for the chosen 'schedule_type'.
-Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
+IMPORTANT EXTRACTION RULES:
+1. If the user ONLY mentions scheduling (time, frequency, dates) without content preferences, set "has_config_preferences": false and all other config fields to null.
+2. If the user mentions BOTH scheduling AND content preferences (topic, style, tone, format), extract both sections.
+3. For scheduling, if a detail is not specified, use 'null' for string/object fields or infer sensible defaults.
+4. For config, only extract preferences that are explicitly mentioned or clearly implied.
+5. Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
 
 Examples:
-User: "Schedule a daily AI update reminder at 9 AM IST
+User: "Schedule a daily AI update reminder at 9 AM IST"
 JSON Output:
 {{
-  "name": "Daily AI Update Reminder",
-  "schedule_type": "daily",
-  "schedule_value": {{"time": "09:00 AM"}},
-  "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": null,
-  "notes": null
+  "schedule": {{
+    "name": "Daily AI Update Reminder",
+    "schedule_type": "daily",
+    "schedule_value": {{"time": "09:00 AM"}},
+    "timezone": "Asia/Kolkata",
+    "reminder_content_prompt_id": null,
+    "notes": null
+  }},
+  "user_config_updates": {{
+    "has_config_preferences": false,
+    "topic_preferences": null,
+    "style_preferences": null,
+    "tone_preferences": null,
+    "length_preferences": null,
+    "additional_instructions": null
+  }}
 }}
 
-User: "Remind me weekly every Tuesday at 3pm PST about the team sync 
+User: "Remind me weekly every Tuesday at 3pm PST about team sync meetings, but make the reminders witty and brief"
 JSON Output:
 {{
-  "name": "Team Sync Reminder",
-  "schedule_type": "weekly",
-  "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},  "timezone": "America/Los_Angeles",
-  "reminder_content_prompt_id": null,
-  "notes": null
+  "schedule": {{
+    "name": "Team Sync Reminder",
+    "schedule_type": "weekly",
+    "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},
+    "timezone": "America/Los_Angeles",
+    "reminder_content_prompt_id": null,
+    "notes": null
+  }},
+  "user_config_updates": {{
+    "has_config_preferences": true,
+    "topic_preferences": "team sync meetings",
+    "style_preferences": "brief",
+    "tone_preferences": "witty",
+    "length_preferences": "brief",
+    "additional_instructions": null
+  }}
 }}
 
 User: "Schedule a one-time reminder for my project deadline on 2025-06-30 at 5 PM"
 JSON Output:
 {{
-  "name": "Project Deadline Reminder",
-  "schedule_type": "once",
-  "schedule_value": {{"date": "2025-06-30", "time": "5:00 PM"}},
-  "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": null,
-  "notes": null
+  "schedule": {{
+    "name": "Project Deadline Reminder",
+    "schedule_type": "once",
+    "schedule_value": {{"date": "2025-06-30", "time": "5:00 PM"}},
+    "timezone": "Asia/Kolkata",
+    "reminder_content_prompt_id": null,
+    "notes": null
+  }},
+  "user_config_updates": {{
+    "has_config_preferences": false,
+    "topic_preferences": null,
+    "style_preferences": null,
+    "tone_preferences": null,
+    "length_preferences": null,
+    "additional_instructions": null
+  }}
 }}
 
-User: "Remind me every 3 hours to stretch"
+User: "Remind me every 3 hours about Python programming tips, I want detailed code examples in a professional tone"
 JSON Output:
 {{
-  "name": "Stretching Reminder",
-  "schedule_type": "interval",
-  "schedule_value": {{"interval": 3, "unit": "hours"}},
-  "timezone": "Asia/Kolkata",
-  "reminder_content_prompt_id": null,
-  "notes": null
+  "schedule": {{
+    "name": "Python Programming Tips Reminder",
+    "schedule_type": "interval",
+    "schedule_value": {{"interval": 3, "unit": "hours"}},
+    "timezone": "Asia/Kolkata",
+    "reminder_content_prompt_id": null,
+    "notes": null
+  }},
+  "user_config_updates": {{
+    "has_config_preferences": true,
+    "topic_preferences": "Python programming tips",
+    "style_preferences": "detailed code examples",
+    "tone_preferences": "professional",
+    "length_preferences": "detailed",
+    "additional_instructions": "include code examples"
+  }}
 }}
 
 User Input: {user_input}
@@ -484,43 +536,27 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
     logger.info("========= Starting Parameter Parsing =========")
     logger.info(f"Processing user input: '{user_input}'")
 
-    try:
-        # Construct LLM prompt
+    try:        # Construct LLM prompt
         llm_prompt = SCHEDULING_EXTRACTION_PROMPT_TEMPLATE.format(user_input=user_input).strip()
+        
         logger.info("🔄 Generated LLM prompt:")
         logger.info("---BEGIN PROMPT---")
         logger.info(llm_prompt)
         logger.info("---END PROMPT---")
-          # Get LLM response
-        raw_llm_output, context = await get_gemini_response_async(llm_prompt)
-        logger.info(f"LLM context info: {context}")
+        
+        # Get LLM response (returns tuple: response, context)
+        raw_llm_output, response_context = await get_gemini_response_async(llm_prompt)
+        
         logger.info("✅ Received LLM response:")
         logger.info("---BEGIN LLM RESPONSE---")
         logger.info(raw_llm_output)
         logger.info("---END LLM RESPONSE---")
+        logger.info(f"LLM processing context: {response_context.get('processing_status', 'unknown')}")
 
-        if raw_llm_output is None:
-            # Enhanced error handling using context information
-            error_type = context.get("error_type", "unknown")
-            error_details = context.get("error_details", "No details available")
-            processing_attempts = context.get("processing_attempts", 0)
-            
-            # Context-aware error messages for schedule parsing
-            if error_type == "api_key_invalid":
-                logger.error(f"❌ LLM API key configuration error for schedule parsing. Cannot proceed.")
-            elif error_type == "quota_exceeded":
-                logger.error(f"❌ LLM API quota exceeded for schedule parsing after {processing_attempts} attempts.")
-            elif error_type == "rate_limit":
-                logger.error(f"❌ LLM API rate limit hit for schedule parsing after {processing_attempts} attempts.")
-            elif error_type == "max_retries":
-                logger.error(f"❌ LLM failed after {processing_attempts} retry attempts for schedule parsing. Error: {error_details}")
-            else:
-                logger.error(f"❌ LLM returned None response for schedule parsing. Error type: {error_type}, Details: {error_details}")
-            
-            # Enhanced context logging for debugging
-            logger.info(f"Schedule parsing LLM failure context - Type: {error_type}, Attempts: {processing_attempts}, Status: {context.get('processing_status', 'unknown')}")
-            
-            return {"status": "failure", "message": "Failed to get a response from the AI for scheduling details."}
+        if raw_llm_output is None or response_context.get("processing_status") != "completed":
+            error_details = response_context.get('error_details', 'Unknown error')
+            logger.error(f"❌ LLM processing failed: {error_details}")
+            return {"status": "failure", "message": f"Failed to get a response from the AI for scheduling details. Error: {error_details}"}
 
         # Extract and parse JSON
         json_start = raw_llm_output.find('{')
@@ -654,23 +690,11 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
     Uses an LLM call to generate a natural language clarification question based on a key.
     """
     prompt = CLARIFICATION_PROMPT_TEMPLATE.format(missing_detail_key=missing_detail_key).strip()
-    
     try:
-        response, context = await get_gemini_response_async(prompt)
-        logger.info(f"Clarification LLM context info: {context}")
-        
+        response = await get_gemini_response_async(prompt)
         if response:
             return response.strip()
-        
-        # Enhanced error handling for clarification generation
-        error_type = context.get("error_type", "unknown")
-        processing_attempts = context.get("processing_attempts", 0)
-        
-        if error_type in ["api_key_invalid", "quota_exceeded", "rate_limit"]:
-            logger.warning(f"LLM {error_type} for clarification key: {missing_detail_key} after {processing_attempts} attempts. Falling back to generic.")
-        else:
-            logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Error: {error_type}. Falling back to generic.")
-        
+        logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Falling back to generic.")
         return "Could you please provide more details to help me schedule this reminder?"
     except Exception as e:
         logger.error(f"Error generating LLM clarification question for '{missing_detail_key}': {e}", exc_info=True)

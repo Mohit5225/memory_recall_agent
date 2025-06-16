@@ -12,12 +12,16 @@ from pymongo.errors import ConnectionFailure, OperationFailure, PyMongoError, Du
 
 from src.config.settings import MONGODB_CONNECTION_STRING, DB_NAME, COLLECTION_NAME
 from src.models.users import User
-from src.models.schedule import Schedule
+from src.models.schedule import Schedule, ScheduleStatus
 from src.models.message import Message, ProcessingStatus  # Added ProcessingStatus
 from src.db.retry import with_retry
 from src.config.constants import DEFAULT_CONTEXT_WINDOW  # Import constant for consistent windowing
 
 logger = logging.getLogger(__name__)
+
+# Validate that ScheduleStatus was imported correctly
+if not hasattr(ScheduleStatus, 'ACTIVE'):
+    raise ImportError("ScheduleStatus.ACTIVE not found - import issue detected")
 
 # Global client (managed by FastAPI/Uvicorn lifespan events)
 # Changed type hint to Motor's async client
@@ -541,7 +545,9 @@ async def get_schedule_by_id(schedule_id: str) -> Optional[Schedule]:
 
         if schedule_doc:
             logger.debug(f"✅ Found schedule document for _id: {schedule_id}.")
-            return Schedule(**schedule_doc)
+            # Migrate old documents to ensure compatibility
+            migrated_doc = _migrate_old_schedule_document(schedule_doc)
+            return Schedule(**migrated_doc)
         else:
             logger.debug(f"No schedule document found for _id: {schedule_id}.")
             return None
@@ -569,10 +575,9 @@ async def find_schedules(user_id: Optional[str] = None, query_params: Optional[D
         if query_params:
             query.update(query_params)
 
-        logger.debug(f"Fetching schedule definitions with query: {query}")
-        # Await the cursor and then convert to list
+        logger.debug(f"Fetching schedule definitions with query: {query}")        # Await the cursor and then convert to list
         schedule_docs = await collection.find(query).to_list(length=None) 
-        schedules = [Schedule(**doc) for doc in schedule_docs]
+        schedules = [Schedule(**_migrate_old_schedule_document(doc)) for doc in schedule_docs]
         logger.debug(f"✅ Found {len(schedules)} schedule definitions with query.")
         return schedules
 
@@ -738,5 +743,47 @@ async def update_message_status(
     except Exception as e:
         logger.error(f"Unexpected error in update_message_status: {e}")
         raise DatabaseError(f"Unexpected error in update_message_status: {e}")
+
+def _migrate_old_schedule_document(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Migrate old schedule documents to the new format.
+    Handles backward compatibility for documents missing schedule_type and schedule_value.
+    """
+    # Create a copy to avoid modifying the original
+    migrated_doc = doc.copy()
+    
+    # If the document has the old 'recurrence_rule' field but no 'schedule_type'
+    if 'recurrence_rule' in doc and 'schedule_type' not in doc:
+        old_rule = doc['recurrence_rule']
+        
+        # Map old recurrence_rule values to new schedule_type
+        if old_rule == 'once':
+            migrated_doc['schedule_type'] = 'once'
+            migrated_doc['schedule_value'] = {'type': 'once'}
+        elif old_rule == 'daily':
+            migrated_doc['schedule_type'] = 'daily'
+            migrated_doc['schedule_value'] = {'time': '09:00'}  # Default time
+        elif old_rule == 'weekly':
+            migrated_doc['schedule_type'] = 'weekly'
+            migrated_doc['schedule_value'] = {'day_of_week': 'monday', 'time': '09:00'}
+        elif old_rule == 'monthly':
+            migrated_doc['schedule_type'] = 'monthly'
+            migrated_doc['schedule_value'] = {'day_of_month': 1, 'time': '09:00'}
+        else:
+            # Fallback for unknown old rules
+            migrated_doc['schedule_type'] = 'once'
+            migrated_doc['schedule_value'] = {'type': 'legacy', 'original_rule': old_rule}
+    
+    # Ensure schedule_type and schedule_value exist
+    if 'schedule_type' not in migrated_doc:
+        migrated_doc['schedule_type'] = 'once'
+    if 'schedule_value' not in migrated_doc:
+        migrated_doc['schedule_value'] = {'type': 'default'}
+        
+    # Add default name if missing
+    if 'name' not in migrated_doc:
+        migrated_doc['name'] = f"Legacy Schedule ({migrated_doc.get('schedule_type', 'unknown')})"
+    
+    return migrated_doc
 
 logger.info("✅ MongoDB database functions refined for robustness.")
