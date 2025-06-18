@@ -48,6 +48,9 @@ class Schedule(BaseModel):
     # This is where the 'sophisticated' rule details live - primarily for display/auditing the LLM's raw parse
     schedule_value: Dict[str, Any] = Field(...)
 
+    # The timezone for this schedule (IANA format), defaulting to UTC
+    timezone: str = Field(default="UTC")
+
     # --- NEW: The precise, machine-readable recurrence rule parameters for dateutil.rrule ---
     # This is derived from schedule_value in src/core/scheduler.py,
     # ensuring clean data for the Celery Beat scheduler.

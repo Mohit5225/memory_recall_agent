@@ -1,6 +1,6 @@
 # src/core/scheduler.py
 from celery_config.Celery_app import celery_app01
-from src.db.mongo import create_schedule_definition, get_schedule_by_id, find_schedules, update_schedule_by_id, delete_schedule_by_id, deactivate_schedule_by_id, DatabaseError
+from src.db.mongo import create_schedule_definition, get_schedule_by_id, find_schedules, update_schedule_by_id, delete_schedule_by_id, deactivate_schedule_by_id, DatabaseError, get_user_config, save_user_config, normalize_user_config
 from src.models.schedule import Schedule, PyObjectId, ScheduleType, ScheduleStatus # Import all relevant enums/models
 from src.llm.gemini import get_gemini_response_async # Assuming this is available and works
 import logging
@@ -23,121 +23,72 @@ class ScheduleClarificationNeeded(Exception):
         self.missing_field = missing_field
         self.clarification_prompt_key = clarification_prompt_key or missing_field # Key for specific LLM prompt
 
-# --- LLM Prompt for Unified Scheduling and Config Extraction ---
-SCHEDULING_EXTRACTION_PROMPT_TEMPLATE = """
-You are a unified extraction system for a reminder agent that handles both scheduling and user configuration.
-Your task is to analyze the user's request and extract scheduling details AND any user configuration preferences.
-Format the extracted information as a JSON object.
+# --- LLM Prompt for Unified Config and Schedule Extraction ---
+UNIFIED_EXTRACTION_PROMPT_TEMPLATE = """
+You are a unified extraction system for a personal reminder agent that handles both user configuration and schedule creation.
+Your task is to analyze the user's request and extract BOTH configuration preferences and scheduling details.
+
+{context_instruction}
 
 Expected JSON Schema:
 {{
+  "config": {{
+    "full_instruction_prompt": "string (the complete user preferences for reminder content, tone, topics, style - merge with existing config if provided, or create new if not)",
+    "message_limit": "number (max messages to keep in history, default: 10)",
+    "timezone": "string (user's preferred timezone, e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - use IANA format)"
+  }},
   "schedule": {{
     "name": "string (a concise, human-readable name for the reminder, e.g., 'Daily AI Update', 'Tuesday Meeting Reminder')",
     "schedule_type": "string (one of: daily, weekly, monthly, once, interval, none_other - based on frequency or specific dates)",
     "schedule_value": "object (details for the schedule_type, e.g., {{"time": "10:00"}} for daily, {{"day_of_week": "Monday", "time": "09:00"}} for weekly, {{"date": "2025-12-31", "time": "14:00"}} for once, {{"interval": 2, "unit": "days"}} for interval. Empty object if not specified)",
-    "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - infer from context or default to 'Asia/Kolkata' if unsure, use IANA format)",
+    "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - inherit from config or infer from context)",
     "reminder_content_prompt_id": "string (Optional - The MongoDB ObjectId as a string for a predefined reminder template, or null if using direct message)",
     "notes": "string (any other relevant scheduling details or constraints, or null if none - e.g., 'weekends only', 'every other day')"
-  }},
-  "user_config_updates": {{
-    "has_config_preferences": "boolean (true if user mentioned preferences about reminder style, tone, topics, format, etc.; false if only scheduling)",
-    "topic_preferences": "string (the main topic/subject area for reminders, e.g., 'Python programming', 'Machine Learning', 'Health tips', or null if not specified)",
-    "style_preferences": "string (preferred style/format, e.g., 'brief bullet points', 'detailed explanations', 'code examples', or null if not specified)",
-    "tone_preferences": "string (preferred tone, e.g., 'professional', 'casual', 'witty', 'motivational', or null if not specified)",
-    "length_preferences": "string (preferred length, e.g., 'short', 'medium', 'detailed', '2-3 sentences', or null if not specified)",
-    "additional_instructions": "string (any other specific instructions about how reminders should be generated, or null if none)"
   }}
 }}
 
-IMPORTANT EXTRACTION RULES:
-1. If the user ONLY mentions scheduling (time, frequency, dates) without content preferences, set "has_config_preferences": false and all other config fields to null.
-2. If the user mentions BOTH scheduling AND content preferences (topic, style, tone, format), extract both sections.
-3. For scheduling, if a detail is not specified, use 'null' for string/object fields or infer sensible defaults.
-4. For config, only extract preferences that are explicitly mentioned or clearly implied.
-5. Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
+IMPORTANT INSTRUCTIONS:
+- If existing config is provided in context, MERGE the new preferences with existing ones, don't replace entirely
+- If no existing config, create a new comprehensive config based on user preferences
+- Extract content topics, tone, style preferences for the config section
+- Always include both "config" and "schedule" sections in the response
+- Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
 
 Examples:
-User: "Schedule a daily AI update reminder at 9 AM IST"
+
+User: "Set up daily reminders about Python programming at 9 AM with a professional and encouraging tone"
 JSON Output:
 {{
+  "config": {{
+    "full_instruction_prompt": "Create reminders about Python programming topics with a professional and encouraging tone. Focus on practical tips, best practices, and motivational content to support learning and development.",
+    "message_limit": 10,
+    "timezone": "Asia/Kolkata"
+  }},
   "schedule": {{
-    "name": "Daily AI Update Reminder",
+    "name": "Daily Python Programming Reminder",
     "schedule_type": "daily",
     "schedule_value": {{"time": "09:00 AM"}},
     "timezone": "Asia/Kolkata",
     "reminder_content_prompt_id": null,
     "notes": null
-  }},
-  "user_config_updates": {{
-    "has_config_preferences": false,
-    "topic_preferences": null,
-    "style_preferences": null,
-    "tone_preferences": null,
-    "length_preferences": null,
-    "additional_instructions": null
   }}
 }}
 
-User: "Remind me weekly every Tuesday at 3pm PST about team sync meetings, but make the reminders witty and brief"
+User: "Remind me weekly every Tuesday at 3pm about team meetings with detailed and formal tone"
 JSON Output:
 {{
+  "config": {{
+    "full_instruction_prompt": "Create reminders about team meetings with a detailed and formal tone. Include relevant preparation tips, agenda items, and professional language suitable for workplace communication.",
+    "message_limit": 10,
+    "timezone": "Asia/Kolkata"
+  }},
   "schedule": {{
-    "name": "Team Sync Reminder",
+    "name": "Weekly Team Meeting Reminder",
     "schedule_type": "weekly",
     "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},
-    "timezone": "America/Los_Angeles",
-    "reminder_content_prompt_id": null,
-    "notes": null
-  }},
-  "user_config_updates": {{
-    "has_config_preferences": true,
-    "topic_preferences": "team sync meetings",
-    "style_preferences": "brief",
-    "tone_preferences": "witty",
-    "length_preferences": "brief",
-    "additional_instructions": null
-  }}
-}}
-
-User: "Schedule a one-time reminder for my project deadline on 2025-06-30 at 5 PM"
-JSON Output:
-{{
-  "schedule": {{
-    "name": "Project Deadline Reminder",
-    "schedule_type": "once",
-    "schedule_value": {{"date": "2025-06-30", "time": "5:00 PM"}},
     "timezone": "Asia/Kolkata",
     "reminder_content_prompt_id": null,
     "notes": null
-  }},
-  "user_config_updates": {{
-    "has_config_preferences": false,
-    "topic_preferences": null,
-    "style_preferences": null,
-    "tone_preferences": null,
-    "length_preferences": null,
-    "additional_instructions": null
-  }}
-}}
-
-User: "Remind me every 3 hours about Python programming tips, I want detailed code examples in a professional tone"
-JSON Output:
-{{
-  "schedule": {{
-    "name": "Python Programming Tips Reminder",
-    "schedule_type": "interval",
-    "schedule_value": {{"interval": 3, "unit": "hours"}},
-    "timezone": "Asia/Kolkata",
-    "reminder_content_prompt_id": null,
-    "notes": null
-  }},
-  "user_config_updates": {{
-    "has_config_preferences": true,
-    "topic_preferences": "Python programming tips",
-    "style_preferences": "detailed code examples",
-    "tone_preferences": "professional",
-    "length_preferences": "detailed",
-    "additional_instructions": "include code examples"
   }}
 }}
 
@@ -243,8 +194,7 @@ class RRuleGenerator:
                     "Time is required for a one-time schedule.",
                     missing_field="time",
                     clarification_prompt_key="missing_time_for_once"
-                )
-            # For 'once' schedules, we don't generate rrule_params directly,
+                )            # For 'once' schedules, we don't generate rrule_params directly,
             # but rather a specific datetime for next_run_at.
             # We'll handle this special case in _calculate_next_run_at.
             return {} # No rrule params for 'once'
@@ -262,31 +212,74 @@ class RRuleGenerator:
         elif self.schedule_type == ScheduleType.WEEKLY.value:
             logger.info("Processing weekly schedule...")
             rrule_params['freq'] = WEEKLY
-            day_of_week_str = self.schedule_value.get("day_of_week")
-            if not day_of_week_str:
+            day_of_week_value = self.schedule_value.get("day_of_week") or self.schedule_value.get("days_of_week")
+            if not day_of_week_value:
                 raise ScheduleClarificationNeeded(
                     "Day of the week (e.g., Monday) is required for a weekly schedule.",
                     missing_field="day_of_week",
                     clarification_prompt_key="missing_day_for_weekly"
                 )
-            byweekday = self.DAY_MAP.get(day_of_week_str.lower())
-            if byweekday is None:
+            
+            # Handle both single day (string) and multiple days (list)
+            if isinstance(day_of_week_value, str):
+                # Single day of week
+                byweekday = self.DAY_MAP.get(day_of_week_value.lower())
+                if byweekday is None:
+                    raise ScheduleClarificationNeeded(
+                        f"Invalid day of week: {day_of_week_value}. Please provide a valid day (e.g., Monday).",
+                        missing_field="day_of_week",
+                        clarification_prompt_key="invalid_day_format"
+                    )
+                rrule_params['byweekday'] = byweekday
+            elif isinstance(day_of_week_value, list):
+                # Multiple days of week (e.g., weekends)
+                byweekdays = []
+                for day_str in day_of_week_value:
+                    if not isinstance(day_str, str):
+                        raise ScheduleClarificationNeeded(
+                            f"Invalid day format in list: {day_str}. Each day should be a string (e.g., 'Monday').",
+                            missing_field="day_of_week",
+                            clarification_prompt_key="invalid_day_format"
+                        )
+                    byweekday = self.DAY_MAP.get(day_str.lower())
+                    if byweekday is None:
+                        raise ScheduleClarificationNeeded(
+                            f"Invalid day of week: {day_str}. Please provide valid days (e.g., Monday, Tuesday).",
+                            missing_field="day_of_week",
+                            clarification_prompt_key="invalid_day_format"
+                        )
+                    byweekdays.append(byweekday)
+                rrule_params['byweekday'] = byweekdays
+            else:
                 raise ScheduleClarificationNeeded(
-                    f"Invalid day of week: {day_of_week_str}. Please provide a valid day (e.g., Monday).",
+                    f"Invalid day_of_week format: {day_of_week_value}. Should be a string (e.g., 'Monday') or list (e.g., ['Saturday', 'Sunday']).",
                     missing_field="day_of_week",
                     clarification_prompt_key="invalid_day_format"
                 )
-            rrule_params['byweekday'] = byweekday
+            
+            # For multi-day schedules without specified time, use a default time
             if hour is None or minute is None:
-                raise ScheduleClarificationNeeded(
-                    "Time is required for a weekly schedule.",
-                    missing_field="time",
-                    clarification_prompt_key="missing_time_for_weekly"
-                )
+                if isinstance(day_of_week_value, list):
+                    # For multi-day schedules (like weekends), default to 10:00 AM if no time specified
+                    logger.info("Multi-day weekly schedule without time - defaulting to 10:00 AM")
+                    hour, minute, second = 10, 0, 0
+                else:                    raise ScheduleClarificationNeeded(
+                        "Time is required for a weekly schedule.",
+                        missing_field="time",
+                        clarification_prompt_key="missing_time_for_weekly"
+                    )
 
         elif self.schedule_type == ScheduleType.MONTHLY.value:
             logger.info("Processing monthly schedule...")
             rrule_params['freq'] = MONTHLY
+            
+            # Parse time if provided
+            time_str = self.schedule_value.get("time")
+            if time_str:
+                hour, minute, second = self.parse_time_string(time_str)
+            else:
+                hour, minute, second = None, None, None
+            
             day_of_month = self.schedule_value.get("day_of_month") # e.g., 15
             if day_of_month is not None:
                 try:
@@ -301,8 +294,22 @@ class RRuleGenerator:
                         clarification_prompt_key="invalid_day_of_month_format"
                     )
             elif "day_of_week" in self.schedule_value and "week_of_month" in self.schedule_value: # e.g., third Monday
-                day_of_week_str = self.schedule_value["day_of_week"]
+                day_of_week_value = self.schedule_value["day_of_week"]
                 week_of_month = self.schedule_value["week_of_month"] # e.g., 1, 2, 3, 4, -1
+                
+                # Handle both string and list for day_of_week in monthly schedules
+                if isinstance(day_of_week_value, str):
+                    day_of_week_str = day_of_week_value
+                elif isinstance(day_of_week_value, list) and len(day_of_week_value) > 0:
+                    # For monthly schedules with multiple days, use the first one
+                    day_of_week_str = day_of_week_value[0]
+                else:
+                    raise ScheduleClarificationNeeded(
+                        "Invalid day_of_week format.",
+                        missing_field="day_of_week",
+                        clarification_prompt_key="invalid_day_format"
+                    )
+                
                 byweekday = self.DAY_MAP.get(day_of_week_str.lower())
                 if byweekday is None:
                     raise ScheduleClarificationNeeded(
@@ -487,6 +494,74 @@ class RRuleGenerator:
                     clarification_prompt_key="rrule_calculation_error"
                 )
 
+    def serialize_rrule_params_for_db(self, rrule_params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert rrule_params to a MongoDB-serializable format.
+        Converts dateutil.rrule.weekday objects to integers.
+        """
+        serialized = rrule_params.copy()
+        
+        # Convert weekday objects to integers
+        if 'byweekday' in serialized:
+            weekday_value = serialized['byweekday']
+            if hasattr(weekday_value, 'weekday'):
+                # Single weekday object (e.g., MO, TU, etc.)
+                serialized['byweekday'] = weekday_value.weekday
+            elif isinstance(weekday_value, list):
+                # List of weekday objects or tuples
+                serialized_weekdays = []
+                for wd in weekday_value:
+                    if hasattr(wd, 'weekday'):
+                        # Weekday object with possible nth occurrence
+                        if hasattr(wd, 'n') and wd.n is not None:
+                            # e.g., MO(2) for second Monday -> [0, 2]
+                            serialized_weekdays.append([wd.weekday, wd.n])
+                        else:
+                            # Simple weekday -> 0
+                            serialized_weekdays.append(wd.weekday)
+                    else:
+                        # Already serialized or integer
+                        serialized_weekdays.append(wd)
+                serialized['byweekday'] = serialized_weekdays
+        
+        return serialized
+
+    @staticmethod
+    def deserialize_rrule_params_from_db(serialized_params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert MongoDB-stored rrule_params back to dateutil format.
+        Converts integers back to dateutil.rrule.weekday objects.
+        """
+        from dateutil.rrule import MO, TU, WE, TH, FR, SA, SU
+        
+        WEEKDAY_MAP = [MO, TU, WE, TH, FR, SA, SU]
+        
+        deserialized = serialized_params.copy()
+        
+        # Convert integers back to weekday objects
+        if 'byweekday' in deserialized:
+            weekday_value = deserialized['byweekday']
+            if isinstance(weekday_value, int):
+                # Single integer -> weekday object
+                deserialized['byweekday'] = WEEKDAY_MAP[weekday_value]
+            elif isinstance(weekday_value, list):
+                # List of integers or [int, nth] pairs
+                deserialized_weekdays = []
+                for wd in weekday_value:
+                    if isinstance(wd, int):
+                        # Simple integer -> weekday object
+                        deserialized_weekdays.append(WEEKDAY_MAP[wd])
+                    elif isinstance(wd, list) and len(wd) == 2:
+                        # [weekday_int, nth] -> weekday(nth)
+                        weekday_obj = WEEKDAY_MAP[wd[0]]
+                        deserialized_weekdays.append(weekday_obj(wd[1]))
+                    else:
+                        # Already deserialized or unknown format
+                        deserialized_weekdays.append(wd)
+                deserialized['byweekday'] = deserialized_weekdays
+        
+        return deserialized
+
 # --- LLM Clarification Question Generation Prompt ---
 CLARIFICATION_PROMPT_TEMPLATE = """
 The user wants to set a reminder, but some information required for the schedule is missing or unclear.
@@ -528,23 +603,67 @@ Question:"""
 
 
 # --- Core Scheduling Logic ---
-async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, Any]:
+async def parse_schedule_parameters_and_clarify(user_input: str, user_id: str) -> Dict[str, Any]:
     """
-    Orchestrates the LLM extraction, deterministic RRule parameter generation,
-    and handles clarification requests.
+    Orchestrates the unified config+schedule extraction from user input.
+    Checks for existing config, calls LLM with unified prompt, and returns both config and schedule data.
     """
-    logger.info("========= Starting Parameter Parsing =========")
-    logger.info(f"Processing user input: '{user_input}'")
+    logger.info("========= Starting Unified Config+Schedule Parameter Parsing =========")
+    logger.info(f"Processing user input: '{user_input}' for user: {user_id}")
 
-    try:        # Construct LLM prompt
-        llm_prompt = SCHEDULING_EXTRACTION_PROMPT_TEMPLATE.format(user_input=user_input).strip()
+    try:        # Step 1: Load and normalize existing user config
+        logger.info("🔄 Checking for existing user config...")
+        raw_existing = await get_user_config(user_id)
+        norm_existing = normalize_user_config(raw_existing)
+        # Step 2: Build context instruction for LLM prompt
+        prompt_value = norm_existing['full_instruction_prompt']
+        existing_prompt = prompt_value.strip()
+        if existing_prompt:
+            logger.info("✅ Found existing config - will merge with new preferences")
+            context_instruction = f"""
+EXISTING USER CONFIG CONTEXT:
+The user already has these preferences configured:
+- Current instruction prompt: \"{norm_existing['full_instruction_prompt']}\"
+- Current timezone: \"{norm_existing['timezone']}\"
+- Current message limit: {norm_existing['message_limit']}
+
+Please MERGE the new preferences from the user input with the existing config. Keep existing preferences unless the user specifically wants to change them.
+"""
+        else:
+            logger.info("ℹ️ No existing config found - will create new comprehensive config")
+            context_instruction = """
+NEW USER SETUP:
+This user has no existing configuration. Please create a comprehensive new config based on their preferences in the input.
+Extract topic preferences, tone, style, and any other customization details they mention.
+"""
+
+        # Phase 1: include existing schedule context
+        logger.info("🔄 Checking for existing user schedule...")
+        existing_schedules = await find_schedules(user_id=user_id, query_params={"status": ScheduleStatus.ACTIVE.value})
+        if existing_schedules:
+            existing_schedule = existing_schedules[0]
+            context_instruction += f"""
+EXISTING USER SCHEDULE CONTEXT:
+- Name: \"{existing_schedule.name}\"
+- Type: \"{existing_schedule.schedule_type}\"
+- Value: {json.dumps(existing_schedule.schedule_value)}
+- Timezone: \"{existing_schedule.timezone}\"
+
+Please only update these fields if the user request changes them.
+"""
+
+        # Step 3: Construct unified LLM prompt
+        llm_prompt = UNIFIED_EXTRACTION_PROMPT_TEMPLATE.format(
+            context_instruction=context_instruction,
+            user_input=user_input
+        ).strip()
         
-        logger.info("🔄 Generated LLM prompt:")
+        logger.info("🔄 Generated unified LLM prompt:")
         logger.info("---BEGIN PROMPT---")
         logger.info(llm_prompt)
         logger.info("---END PROMPT---")
         
-        # Get LLM response (returns tuple: response, context)
+        # Step 4: Get LLM response (returns tuple: response, context)
         raw_llm_output, response_context = await get_gemini_response_async(llm_prompt)
         
         logger.info("✅ Received LLM response:")
@@ -558,7 +677,7 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
             logger.error(f"❌ LLM processing failed: {error_details}")
             return {"status": "failure", "message": f"Failed to get a response from the AI for scheduling details. Error: {error_details}"}
 
-        # Extract and parse JSON
+        # Step 5: Extract and parse JSON
         json_start = raw_llm_output.find('{')
         json_end = raw_llm_output.rfind('}')
         if json_start == -1 or json_end == -1:
@@ -569,118 +688,104 @@ async def parse_schedule_parameters_and_clarify(user_input: str) -> Dict[str, An
         logger.info("🔄 Attempting to parse JSON from LLM output:")
         logger.info(f"Extracted JSON string: {json_string}")
         
-        parsed_params_raw = json.loads(json_string)
-        logger.info("✅ Successfully parsed JSON. Parameters:")
-        logger.info(json.dumps(parsed_params_raw, indent=2))
+        parsed_response = json.loads(json_string)
+        logger.info("✅ Successfully parsed JSON. Full response:")
+        logger.info(json.dumps(parsed_response, indent=2))
 
-        # Validate the parsed parameters        logger.info("🔄 Validating parsed parameters...")
-        expected_keys_and_types = {
-            "name": str,
-            "schedule_type": str,
-            "schedule_value": dict,
-            "timezone": (str, type(None)),
-            "reminder_content_prompt_id": (str, type(None)),  # Make it optional
-            "notes": (str, type(None))
-        }
+        # Step 6: Validate the unified response structure
+        if "config" not in parsed_response or "schedule" not in parsed_response:
+            logger.error("❌ LLM response missing required 'config' or 'schedule' sections")
+            return {"status": "failure", "message": "The AI response was missing required configuration or schedule information."}
 
-        # Check for mandatory keys and their types (allowing None for optional)
-        for key, expected_type in expected_keys_and_types.items():
-            value = parsed_params_raw.get(key)            # Skip validation for reminder_content_prompt_id as it's optional
-            if key == "reminder_content_prompt_id":
-                continue
-                
-            if value is None and expected_type is not (str, type(None)): # if it's mandatory and None
-                logger.warning(f"Missing mandatory field from LLM: {key}")
+        config_data = parsed_response["config"]
+        schedule_data = parsed_response["schedule"]
+
+        # Step 7: Validate config section
+        logger.info("🔄 Validating config section...")
+        config_required_keys = ["full_instruction_prompt", "message_limit", "timezone"]
+        for key in config_required_keys:
+            if key not in config_data or config_data[key] is None:
+                logger.warning(f"Missing config field: {key}")
                 return {"status": "clarification_needed", 
-                        "question": await get_llm_clarification_question(key),
-                        "missing_field": key}
-            if value is not None and not isinstance(value, expected_type):
-                logger.warning(f"Invalid type for field '{key}': Expected {expected_type}, got {type(value)}")
-                # For `schedule_value` if it's not a dict, it's a severe error
-                if key == "schedule_value":
-                    parsed_params_raw["schedule_value"] = {} # Default to empty dict
-                else:
-                    return {"status": "clarification_needed",
-                            "question": await get_llm_clarification_question(f"invalid_{key}_format"),
-                            "missing_field": key}
-        
-        # Validate ScheduleType enum
-        classified_type_str = parsed_params_raw.get("schedule_type", "").lower()
+                        "question": await get_llm_clarification_question(f"config_{key}"),
+                        "missing_field": f"config_{key}"}
+
+        # Step 8: Validate schedule section
+        logger.info("🔄 Validating schedule section...")
+        schedule_required_keys = ["name", "schedule_type", "schedule_value", "timezone"]
+        for key in schedule_required_keys:
+            if key not in schedule_data or schedule_data[key] is None:
+                logger.warning(f"Missing schedule field: {key}")
+                return {"status": "clarification_needed", 
+                        "question": await get_llm_clarification_question(f"schedule_{key}"),
+                        "missing_field": f"schedule_{key}"}        # Validate ScheduleType enum
+        classified_type_str = schedule_data.get("schedule_type", "").lower()
         if classified_type_str not in [e.value for e in ScheduleType]:
             logger.warning(f"LLM output contained invalid schedule_type: {classified_type_str}")
             return {"status": "clarification_needed",
                     "question": await get_llm_clarification_question("schedule_type"),
                     "missing_field": "schedule_type"}
         
-        schedule_type = ScheduleType(classified_type_str) # Convert to enum        # Handle reminder_content_prompt_id (it's optional)
-        prompt_id_str = parsed_params_raw.get("reminder_content_prompt_id")
-        if prompt_id_str:
-            if ObjectId.is_valid(prompt_id_str):
-                logger.debug("Valid reminder_content_prompt_id provided")
-            else:
-                logger.warning(f"Invalid reminder_content_prompt_id format: {prompt_id_str}, setting to None")
-                parsed_params_raw["reminder_content_prompt_id"] = None
-        else:
-            logger.debug("No reminder_content_prompt_id provided, continuing with None")
-        
-        # --- Step 2: Generate RRule Parameters and Calculate Next Run ---
-        user_timezone = parsed_params_raw.get("timezone") or "Asia/Kolkata" # Default to user's timezone if not specified
+        schedule_type = ScheduleType(classified_type_str)
+
+        # Step 9: Generate RRule Parameters and Calculate Next Run
+        user_timezone = schedule_data.get("timezone") or config_data.get("timezone") or "Asia/Kolkata"
         rrule_generator = RRuleGenerator(
             schedule_type=schedule_type.value,
-            schedule_value=parsed_params_raw.get("schedule_value", {}),
+            schedule_value=schedule_data["schedule_value"],
             user_timezone_str=user_timezone
         )
+
+        try:
+            rrule_params = rrule_generator.generate_rrule_params()
+            initial_next_run_at = rrule_generator.calculate_initial_next_run_at()
+        except ScheduleClarificationNeeded as e:
+            logger.warning(f"Clarification needed for recurring schedule: {e.missing_field} - {e.message}")
+            return {"status": "clarification_needed",
+                    "question": await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
+                    "missing_field": e.missing_field}
+        except Exception as e:
+            logger.error(f"Unexpected error during rrule generation/calculation: {e}", exc_info=True)
+            return {"status": "clarification_needed",
+                    "question": await get_llm_clarification_question("rrule_calculation_error"),
+                    "missing_field": "rrule_calculation_error"}        # Step 10: Prepare final schedule parameters
+        # Serialize rrule_params for MongoDB storage
+        serialized_rrule_params = rrule_generator.serialize_rrule_params_for_db(rrule_params)
         
-        rrule_params = {}
-        initial_next_run_at: Optional[datetime] = None
-
-        if schedule_type == ScheduleType.ONCE:
-            # For 'once', rrule_params will be empty, and next_run_at is directly parsed.
-            try:
-                initial_next_run_at = rrule_generator.calculate_initial_next_run_at()
-            except ScheduleClarificationNeeded as e:
-                logger.warning(f"Clarification needed for 'once' schedule: {e.missing_field} - {e.message}")
-                return {"status": "clarification_needed",
-                        "question": await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
-                        "missing_field": e.missing_field}
-        else:
-            # For recurring schedules, generate rrule_params and then calculate initial_next_run_at
-            try:
-                rrule_params = rrule_generator.generate_rrule_params()
-                initial_next_run_at = rrule_generator.calculate_initial_next_run_at()
-            except ScheduleClarificationNeeded as e:
-                logger.warning(f"Clarification needed for recurring schedule: {e.missing_field} - {e.message}")
-                return {"status": "clarification_needed",
-                        "question": await get_llm_clarification_question(e.clarification_prompt_key or e.missing_field),
-                        "missing_field": e.missing_field}
-            except Exception as e:
-                logger.error(f"Unexpected error during rrule generation/calculation: {e}", exc_info=True)
-                return {"status": "clarification_needed",
-                        "question": await get_llm_clarification_question("rrule_calculation_error"),
-                        "missing_field": "rrule_calculation_error"}
-
-        # Prepare final parameters for Schedule model
-        final_params = {
-            "name": parsed_params_raw["name"],
-            "schedule_type": schedule_type.value, # This is the enum value
-            "schedule_value": parsed_params_raw["schedule_value"], # Keep original LLM output for audit/debug
-            "rrule_params": rrule_params, # The parsed rrule parameters
+        final_schedule_params = {
+            "user_id": user_id,  # Add the missing user_id field
+            "name": schedule_data["name"],
+            "schedule_type": schedule_type.value,
+            "schedule_value": schedule_data["schedule_value"],
+            "rrule_params": serialized_rrule_params,
             "next_run_at": initial_next_run_at,
-            "last_run_at": None, # Initially null
-            "reminder_content_prompt_id": parsed_params_raw.get("reminder_content_prompt_id"),  # Added this field
-            "status": ScheduleStatus.ACTIVE, # Default to active upon creation
-            "timezone": user_timezone, # Store the identified timezone
-            "notes": parsed_params_raw.get("notes"),
+            "last_run_at": None,
+            "reminder_content_prompt_id": schedule_data.get("reminder_content_prompt_id"),
+            "status": ScheduleStatus.ACTIVE,
+            "timezone": user_timezone,
+            "notes": schedule_data.get("notes"),
         }
 
-        logger.info(f"✅ Successfully parsed and validated schedule parameters. Next run at: {initial_next_run_at}")
-        return {"status": "success", "schedule_params": final_params}
+        # Step 11: Prepare final config data
+        final_config_data = {
+            "full_instruction_prompt": config_data["full_instruction_prompt"],
+            "message_limit": config_data["message_limit"],
+            "timezone": config_data["timezone"],
+            "updated_at": datetime.now(timezone.utc)
+        }
+
+        logger.info(f"✅ Successfully parsed unified parameters. Next run at: {initial_next_run_at}")
+        return {
+            "status": "success", 
+            "config_data": final_config_data,
+            "schedule_params": final_schedule_params
+        }
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse LLM output as JSON: {e}. Raw Output: {raw_llm_output}", exc_info=True)
         return {"status": "failure", "message": "Failed to understand the schedule. The AI's response was not valid JSON."}
     except Exception as e:
-        logger.error(f"Unexpected error during schedule parsing and validation for input '{user_input[:100]}...': {e}", exc_info=True)
+        logger.error(f"Unexpected error during unified parsing for input '{user_input[:100]}...': {e}", exc_info=True)
         return {"status": "failure", "message": "An unexpected error occurred while trying to parse your schedule details."}
 
 
@@ -691,8 +796,8 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
     """
     prompt = CLARIFICATION_PROMPT_TEMPLATE.format(missing_detail_key=missing_detail_key).strip()
     try:
-        response = await get_gemini_response_async(prompt)
-        if response:
+        response, context = await get_gemini_response_async(prompt)
+        if response and context.get("processing_status") == "completed":
             return response.strip()
         logger.warning(f"LLM returned empty response for clarification key: {missing_detail_key}. Falling back to generic.")
         return "Could you please provide more details to help me schedule this reminder?"
@@ -704,16 +809,17 @@ async def get_llm_clarification_question(missing_detail_key: str) -> str:
 # --- Function to Schedule a Reminder Task via Celery (Handles parsing outcome) ---
 async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any]:
     """
-    Processes a scheduling request and creates a new schedule definition.
+    Processes a scheduling request with integrated config+schedule creation.
+    Checks for existing config, creates/updates both config and schedule in unified flow.
     """
-    logger.info("========= Starting Schedule Request =========")
+    logger.info("========= Starting Unified Config+Schedule Request =========")
     logger.info(f"Received user input: '{user_input}'")
     logger.info(f"For user_id: {user_id}")
 
     try:
-        # Parse the schedule parameters from the user input
-        logger.info("🔄 Parsing schedule parameters...")
-        parsing_result = await parse_schedule_parameters_and_clarify(user_input)
+        # Step 1: Parse both config and schedule parameters from user input
+        logger.info("🔄 Parsing unified config+schedule parameters...")
+        parsing_result = await parse_schedule_parameters_and_clarify(user_input, user_id)
         logger.info(f"Parsing result status: {parsing_result['status']}")
 
         if parsing_result["status"] == "clarification_needed":
@@ -724,70 +830,119 @@ async def schedule_reminder_task(user_id: str, user_input: str) -> Dict[str, Any
                 "final_outcome": f"I need more information to set up your schedule. {parsing_result.get('question', '')}",
                 "missing_field": parsing_result.get("missing_field")
             }
-        elif parsing_result["status"] == "error":
-            logger.error(f"❌ Failed to parse schedule parameters: {parsing_result.get('message')}")
+        elif parsing_result["status"] == "failure":
+            logger.error(f"❌ Failed to parse parameters: {parsing_result.get('message')}")
             return {
                 "next": "schedule_failure",
                 "final_outcome": parsing_result["message"]
             }
         
         # If status is "success"
+        config_data = parsing_result["config_data"]
         schedule_params = parsing_result["schedule_params"]
-        logger.info("✅ Successfully parsed schedule parameters:")
-        logger.info(f"Name: {schedule_params['name']}")
-        logger.info(f"Type: {schedule_params['schedule_type']}")
-        logger.info(f"Schedule Value: {schedule_params['schedule_value']}")
-        logger.info(f"RRule Params: {schedule_params['rrule_params']}")
-        logger.info(f"Next Run At: {schedule_params['next_run_at']}")
-        logger.info(f"Timezone: {schedule_params['timezone']}")
+        
+        logger.info("✅ Successfully parsed unified parameters:")
+        logger.info(f"Config data: {config_data}")
+        logger.info(f"Schedule params: {schedule_params}")        # Step 2: Check for existing config and determine if update is needed        logger.info("🔄 Checking for existing user config...")
+        existing_config = await get_user_config(user_id)
+        
+        config_needs_update = True
+        prompt = existing_config.get("full_instruction_prompt") or "" if existing_config else ""
+        if existing_config and prompt:
+            logger.info("✅ Found existing config for user")
+            # Compare all fields to determine if update is needed
+            if (existing_config["full_instruction_prompt"] == config_data["full_instruction_prompt"] and
+                existing_config["timezone"] == config_data["timezone"] and
+                existing_config["message_limit"] == config_data["message_limit"]):
+                logger.info("ℹ️ Config unchanged - skipping config save")
+                config_needs_update = False
+        else:
+            logger.info("ℹ️ No existing config found - will create new one")
 
-        try:
-            # Create a Schedule Pydantic model instance
-            logger.info("Creating Schedule model instance...")
-            schedule_definition = Schedule(
-                user_id=user_id,
-                name=schedule_params["name"],
-                schedule_type=schedule_params["schedule_type"],
-                schedule_value=schedule_params["schedule_value"],
-                rrule_params=schedule_params["rrule_params"],
-                next_run_at=schedule_params["next_run_at"],
-                last_run_at=schedule_params["last_run_at"],
-                reminder_content_prompt_id=schedule_params["reminder_content_prompt_id"],
-                status=schedule_params["status"],
-                timezone=schedule_params["timezone"],
-                notes=schedule_params["notes"],
-            )
-
-            # Use the new create_schedule_definition function from mongo.py
-            logger.info("Saving schedule definition to database...")
-            schedule_id = await create_schedule_definition(schedule_definition)
-
-            if schedule_id:
-                logger.info(f"✅ Schedule definition saved in DB. Schedule ID: {schedule_id}")
-                return {
-                    "next": "schedule_success",
-                    "final_outcome": f"Schedule '{schedule_params['name']}' saved successfully. I will send reminders based on your request.",
-                    "schedule_id": str(schedule_id)
-                }
-            else:
-                logger.error(f"Failed to save schedule definition for user {user_id} - create_schedule_definition returned None.")
+        # Step 3: Save the updated/new config (only if changed)
+        if config_needs_update:
+            logger.info("🔄 Saving updated/new user config...")
+            try:
+                config_save_result = await save_user_config(user_id, config_data)
+                if config_save_result:
+                    logger.info("✅ Successfully saved user config")
+                else:
+                    logger.warning("⚠️ Config save returned False - but continuing with schedule creation")
+            except Exception as e:
+                logger.error(f"❌ Failed to save user config: {e}", exc_info=True)
                 return {
                     "next": "schedule_failure",
-                    "final_outcome": "Failed to save your schedule due to an internal database issue. Please try again."
-                }
+                    "final_outcome": "Failed to save your preferences. Please try again."
+                }        # Step 4: Create the schedule using existing function
+        logger.info("🔄 Creating schedule in database...")
+        try:
+            # Check for existing active schedule for this user
+            existing_schedules = await find_schedules(user_id=user_id, query_params={"status": ScheduleStatus.ACTIVE.value})
+            if existing_schedules:
+                # Update the first active schedule
+                existing_schedule = existing_schedules[0]
+                schedule_id = str(existing_schedule.id)
+                logger.info(f"🔄 Found existing schedule ID: {schedule_id}. Updating it.")
+                # Prepare update fields (exclude immutable fields)
+                updates = schedule_params.copy()
+                updates.pop('user_id', None)
+                update_result = await update_schedule_by_id(schedule_id, updates)
+                if update_result:
+                    logger.info(f"✅ Successfully updated schedule with ID: {schedule_id}")
+                else:
+                    logger.warning(f"⚠️ Schedule ID: {schedule_id} not updated (no changes applied).")
+            else:
+                # No existing schedule - create a new one
+                schedule_obj = Schedule(**schedule_params)
+                schedule_creation_result = await create_schedule_definition(schedule_obj)
+                if schedule_creation_result:
+                    schedule_id = schedule_creation_result
+                    logger.info(f"✅ Successfully created schedule with ID: {schedule_id}")
+                else:
+                    logger.error("❌ Schedule creation returned None/False")
+                    return {
+                        "next": "schedule_failure", 
+                        "final_outcome": "Failed to create or update the schedule in the database."
+                    }
+             
+            # Step 5: Enqueue the Celery task for the next run
+            next_run_time = schedule_params["next_run_at"]
+            logger.info(f"🔄 Scheduling Celery task for: {next_run_time}")
+            try:
+                # Use Celery's send_task with eta (estimated time of arrival)
+                task_result = celery_app01.send_task(
+                    "src.task.send_reminder_notification",
+                    args=[str(schedule_id)],
+                    eta=next_run_time
+                )
+                logger.info(f"✅ Celery task scheduled with ID: {task_result.id}")
 
-        except DatabaseError as e:
-            logger.error(f"Database error during schedule definition process for user {user_id}: {e}", exc_info=True)
-            return {"next": "schedule_db_error", "final_outcome": "A database error prevented saving your schedule."}
-        except Exception as e:
-            logger.error(f"Unexpected error during schedule definition process for user {user_id}: {e}", exc_info=True)
-            return {"next": "schedule_exception", "final_outcome": "An internal system error occurred while processing your scheduling request."}
+                return {
+                    "next": "schedule_success",
+                    "final_outcome": f"✅ Perfect! I've set up your '{schedule_params['name']}' reminder and saved your preferences. The first reminder will be sent on {next_run_time.strftime('%Y-%m-%d at %H:%M %Z')}.",
+                    "schedule_id": str(schedule_id),
+                    "next_run_at": next_run_time.isoformat(),
+                    "celery_task_id": task_result.id
+                }
+            except Exception as celery_error:
+                logger.error(f"❌ Failed to schedule Celery task: {celery_error}", exc_info=True)
+                return {
+                    "next": "schedule_failure",
+                    "final_outcome": "Schedule was created but failed to queue the reminder task."
+                }
+            
+        except Exception as db_error:
+             logger.error(f"❌ Database error during create/update schedule: {db_error}", exc_info=True)
+             return {
+                 "next": "schedule_failure",
+                 "final_outcome": "Database error occurred while creating or updating the schedule."
+             }
 
     except Exception as e:
-        logger.error(f"Error in schedule_reminder_task for user {user_id}: {e}", exc_info=True)
+        logger.error(f"❌ Unexpected error in schedule_reminder_task: {e}", exc_info=True)
         return {
-            "next": "schedule_exception",
-            "final_outcome": "An unexpected error occurred while processing your scheduling request."
+            "next": "schedule_failure",
+            "final_outcome": "An unexpected error occurred while processing your schedule request."
         }
 
 

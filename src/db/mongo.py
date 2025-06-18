@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Union
 from datetime import datetime, timezone
 from bson import ObjectId
 
@@ -420,30 +420,43 @@ async def get_user_by_id(user_id: str) -> Optional[User]:
 
 
 @with_retry()
-async def get_user_config(user_id: str) -> str | None:
+async def get_user_config(user_id: str) -> Dict[str, Any]:
     """
-    Fetches the current config prompt for a user from MongoDB.
-    Returns the config string ('') if document/field not found, or raises DatabaseError on critical errors.
+    Fetches the complete user config from MongoDB.
+    Returns config dict with all fields, or empty dict if not found.
     """
     try:
         collection = await get_user_collection() # Await the collection getter
-        logger.debug(f"Fetching user config field for user_id: {user_id} with projection.")
+        logger.debug(f"Fetching user config for user_id: {user_id} with projection.")
         user_doc = await collection.find_one( # Await find_one
             {"user_id": user_id},
-            {"projection": {"config.full_instruction_prompt": 1, "_id": 1}}
+            {"config": 1, "_id": 1}
         )
 
         if user_doc:
-            logger.debug(f"✅ Found user document (projected) for {user_id}.")
-            config = user_doc.get("config")
+            logger.debug(f"✅ Found user document for {user_id}.")
+            config = user_doc.get("config", {})
             if isinstance(config, dict):
-                return config.get("full_instruction_prompt", "")
+                # Return complete config with defaults
+                return {
+                    "full_instruction_prompt": config.get("full_instruction_prompt", ""),
+                    "timezone": config.get("timezone", "UTC"),
+                    "message_limit": config.get("message_limit", 100)
+                }
             else:
                 logger.warning(f"User document for {user_id} has missing or invalid 'config' field.")
-                return ""
+                return {
+                    "full_instruction_prompt": "",
+                    "timezone": "UTC",
+                    "message_limit": 100
+                }
         else:
             logger.debug(f"User document not found for {user_id} during config fetch.")
-            return ""
+            return {
+                "full_instruction_prompt": "",
+                "timezone": "UTC", 
+                "message_limit": 100
+            }
 
     except DatabaseError:
         raise
@@ -456,17 +469,26 @@ async def get_user_config(user_id: str) -> str | None:
 
 
 @with_retry()
-async def save_user_config(user_id: str, updated_instructions: str) -> bool:
+async def save_user_config(user_id: str, config_data: Dict[str, Any]) -> bool:
     """
-    Saves the updated config prompt for a user to MongoDB using upsert.
+    Saves the complete user config (instruction prompt, timezone, message_limit) to MongoDB using upsert.
     Returns True on success, False on operational failure (like duplicate key), raises DatabaseError on critical errors.
     """
     try:
         collection = await get_user_collection() # Await the collection getter
         logger.debug(f"Saving config for user_id: {user_id} to collection: {COLLECTION_NAME}")
+        
+        # Build the update document with all config fields
+        config_update = {
+            "config.full_instruction_prompt": config_data.get("full_instruction_prompt", ""),
+            "config.timezone": config_data.get("timezone", "UTC"),
+            "config.message_limit": config_data.get("message_limit", 100),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
         update_result = await collection.update_one( # Await update_one
             {"user_id": user_id},
-            {"$set": {"config.full_instruction_prompt": updated_instructions, "updated_at": datetime.now(timezone.utc)}},
+            {"$set": config_update},
             upsert=True
         )
 
@@ -762,7 +784,7 @@ def _migrate_old_schedule_document(doc: Dict[str, Any]) -> Dict[str, Any]:
             migrated_doc['schedule_value'] = {'type': 'once'}
         elif old_rule == 'daily':
             migrated_doc['schedule_type'] = 'daily'
-            migrated_doc['schedule_value'] = {'time': '09:00'}  # Default time
+            migrated_doc['schedule_value'] = {'time': '09:00' }  # Default time
         elif old_rule == 'weekly':
             migrated_doc['schedule_type'] = 'weekly'
             migrated_doc['schedule_value'] = {'day_of_week': 'monday', 'time': '09:00'}
@@ -784,6 +806,28 @@ def _migrate_old_schedule_document(doc: Dict[str, Any]) -> Dict[str, Any]:
     if 'name' not in migrated_doc:
         migrated_doc['name'] = f"Legacy Schedule ({migrated_doc.get('schedule_type', 'unknown')})"
     
+    # Ensure timezone field exists for backward compatibility
+    if 'timezone' not in migrated_doc:
+        migrated_doc['timezone'] = 'UTC'
+    
     return migrated_doc
+
+# Add helper to normalize legacy and new configs into full dict
+def normalize_user_config(raw_config: Optional[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
+    """
+    Normalize raw user config (None, string, or dict) into a full config dict with defaults.
+    """
+    defaults = {
+        'full_instruction_prompt': '',
+        'timezone': 'UTC',
+        'message_limit': DEFAULT_CONTEXT_WINDOW,
+    }
+    if not raw_config:
+        return defaults.copy()
+    if isinstance(raw_config, str):
+        return { **defaults, 'full_instruction_prompt': raw_config.strip() }
+    if isinstance(raw_config, dict):
+        return { **defaults, **raw_config }
+    return defaults.copy()
 
 logger.info("✅ MongoDB database functions refined for robustness.")

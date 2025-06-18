@@ -1,5 +1,5 @@
 import logging
-from src.db.mongo import get_user_config, save_user_config
+from src.db.mongo import get_user_config, save_user_config, normalize_user_config
 from src.llm.gemini import get_gemini_response_async
 
 logging.basicConfig(level=logging.INFO)
@@ -72,18 +72,13 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
     logging.info(f"Processing instruction for user: {user_id} - '{new_instruction}'")
 
     try:
-        # 1. Get existing config from DB (or use default if none)
-        existing_instructions = await get_user_config(user_id)
-
-        if existing_instructions is None:
+        # 1. Get and normalize existing config from DB
+        raw_existing = await get_user_config(user_id)
+        if raw_existing is None:
             logging.error(f"Failed to retrieve user config for {user_id}. Cannot proceed.")
-            return False  # Indicate failure
-
-        if not existing_instructions.strip():  # Check if fetched config is empty or just whitespace
-            logging.info(f"No existing config found for {user_id} in DB. Using default instructions.")
-            current_instructions = DEFAULT_INSTRUCTIONS.strip()  # Use and strip default        else:
-            logging.info(f"Using existing config for {user_id} from DB.")
-            current_instructions = existing_instructions.strip()  # Use and strip fetched
+            return False
+        norm_existing = normalize_user_config(raw_existing)
+        current_instructions = norm_existing['full_instruction_prompt'] or DEFAULT_INSTRUCTIONS.strip()
 
         # 2. Construct the prompt for the LLM to perform the 'tweak'
         llm_prompt = TWEAK_AGENT_PROMPT_TEMPLATE.format(
@@ -92,7 +87,7 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
         ).strip()  # Strip prompt whitespace
 
         logging.info("Constructed LLM prompt for tweaking.")
-          # 3. Call the LLM API to get the revised instructions
+        # 3. Call the LLM API to get the revised instructions
         logging.info("Calling LLM to revise instructions...")
         revised_instructions, context = await get_gemini_response_async(llm_prompt)
         logging.info(f"LLM context info: {context}")
@@ -121,34 +116,32 @@ async def process_user_instruction(user_id: str, new_instruction: str) -> bool:
             return False  # Indicate failure
 
         # Ensure the LLM returned text and strip potential surrounding quotes/whitespace
-        revised_instructions = revised_instructions.strip().strip('`').strip()  # Basic cleaning        # 4. Save the revised instructions back to the DB
+        revised_instructions = revised_instructions.strip().strip('`').strip()  # Basic cleaning
+        # 4. Merge into full config and save
+        full_conf = normalize_user_config(raw_existing)
+        full_conf['full_instruction_prompt'] = revised_instructions
         logging.info("Saving revised instructions to DB...")
-        save_success = await save_user_config(user_id, revised_instructions)
+        save_success = await save_user_config(user_id, full_conf)
 
         if save_success:
             logging.info(f"✅ User {user_id} config update process completed.")
-            
             # Enhanced success logging with context information
             if context:
                 processing_status = context.get("processing_status", "unknown")
                 processing_attempts = context.get("processing_attempts", 0)
                 logging.info(f"LLM processing successful - Status: {processing_status}, Attempts: {processing_attempts}")
-            
+            # Preview first lines
             logging.info("Preview of updated config (first 5 non-empty lines):")
             lines = revised_instructions.split('\n')
-            non_empty_lines = [line for line in lines if line.strip()]
-            logging.info('\n'.join(non_empty_lines[:5]))
-            return True  # Indicate successelse:
+            non_empty = [l for l in lines if l.strip()]
+            logging.info('\n'.join(non_empty[:5]))
+            return True  # Indicate success
+        else:
             # Enhanced database save error handling
             logging.error(f"Failed to save revised config for user {user_id}.")
-            
-            # Additional context-aware logging for database failures
             if context:
-                processing_status = context.get("processing_status", "unknown")
-                if processing_status == "completed":
-                    logging.warning(f"LLM processing completed successfully but database save failed for user {user_id}")
-                logging.info(f"LLM processing context at DB save failure - Status: {processing_status}, Attempts: {context.get('processing_attempts', 0)}")
-            
+                proc_stat = context.get("processing_status", "unknown")
+                logging.warning(f"LLM processing context at DB save failure - Status: {proc_stat}, Attempts: {context.get('processing_attempts', 0)}")
             return False  # Indicate failure
 
     except Exception as e:
