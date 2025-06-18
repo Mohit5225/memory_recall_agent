@@ -30,67 +30,63 @@ Your task is to analyze the user's request and extract BOTH configuration prefer
 
 {context_instruction}
 
-Expected JSON Schema:
-{{
-  "config": {{
+example schema for schedule , you should replace the requested information but adopt following structure while returning config according to user request :
+{{{{
+  "config": {{{{
     "full_instruction_prompt": "string (the complete user preferences for reminder content, tone, topics, style - merge with existing config if provided, or create new if not)",
     "message_limit": "number (max messages to keep in history, default: 10)",
     "timezone": "string (user's preferred timezone, e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - use IANA format)"
-  }},
-  "schedule": {{
+  }}}},
+  "schedule": {{{{
     "name": "string (a concise, human-readable name for the reminder, e.g., 'Daily AI Update', 'Tuesday Meeting Reminder')",
     "schedule_type": "string (one of: daily, weekly, monthly, once, interval, none_other - based on frequency or specific dates)",
-    "schedule_value": "object (details for the schedule_type, e.g., {{"time": "10:00"}} for daily, {{"day_of_week": "Monday", "time": "09:00"}} for weekly, {{"date": "2025-12-31", "time": "14:00"}} for once, {{"interval": 2, "unit": "days"}} for interval. Empty object if not specified)",
+    "schedule_value": "object (details for the schedule_type, e.g., {{{{"time": "10:00"}}}} for daily, {{{{"day_of_week": "Monday", "time": "09:00"}}}} for weekly, {{{{"date": "2025-12-31", "time": "14:00"}}}} for once, {{{{"interval": 2, "unit": "days"}}}} for interval. Empty object if not specified)",
     "timezone": "string (e.g., 'UTC', 'Asia/Kolkata', 'America/New_York' - inherit from config or infer from context)",
     "reminder_content_prompt_id": "string (Optional - The MongoDB ObjectId as a string for a predefined reminder template, or null if using direct message)",
     "notes": "string (any other relevant scheduling details or constraints, or null if none - e.g., 'weekends only', 'every other day')"
-  }}
-}}
+  }}}}
+}}}}
 
-IMPORTANT INSTRUCTIONS:
-- If existing config is provided in context, MERGE the new preferences with existing ones, don't replace entirely
-- If no existing config, create a new comprehensive config based on user preferences
+
+example schema for config , you should replace the requested information but adopt following structure while returning config according to user request
+
+  {{
+    _id: ObjectId('6845df7212352b9f85fa8335'),
+    user_id: 'gojo0123456789',
+    config: {{
+      full_instruction_prompt: '# Default Reminder Agent Configuration\\n' +
+        '\\n' +
+        '# --- Core Function ---\\n' +
+        '# This agent generates brief, bite-sized knowledge reminders.\\n' +
+        '# It is NOT meant for deep teaching or conversational dialogue beyond setting preferences.\\n' +
+        '\\n' +
+        '# --- Reminder Topic ---\\n' +
+        '# Current Topic: pytorch methods and functions\\n' +
+        '\\n' +
+        '# --- Reminder Style/Manner ---\\n' +
+        '# Style: Quick, factual.\\n' +
+        '# Tone: witty , uplifting, and engaging.\\n' +
+        '# Length: Max 15-20 sentences.\\n' +
+        '# Timing: 11AM daily\\n' +
+        '\\n' +
+        '# --- Constraints ---\\n' +
+        '# 1. Always stay on the specified topic.\\n' +
+        '# 2. Do not explain concepts in depth. Just provide a brief reminder of their existence or a key characteristic.\\n' +
+        '# 3. Never engage in chat outside of configuration updates.\\n' +
+        '# 4. If asked a question about the topic, the answer should be a reminder, not a lesson.\\n' +
+        '\\n' +
+        '# --- Example (for the AI to understand the format) ---\\n' +
+        `# Example Reminder: "Reminder: 'ls' command lists directory contents in Linux."`
+    }}
+  }}
+
+    IMPORTANT INSTRUCTIONS for schedule schema and config schema:
+- If existing config is provided in context, update the new preferences in fields of existing ones , if no new preferences passed about particular field then simply keep old preferences as before for that particular  field
+- If no existing config, create a new comprehensive config based on message of user but keep schema as instructed below
 - Extract content topics, tone, style preferences for the config section
-- Always include both "config" and "schedule" sections in the response
+- Always include both "config" and "schedule" sections in the response ,keep them seperate  and dont mix them up
 - Return ONLY the JSON object. Do NOT include any other text before or after the JSON.
 
-Examples:
-
-User: "Set up daily reminders about Python programming at 9 AM with a professional and encouraging tone"
-JSON Output:
-{{
-  "config": {{
-    "full_instruction_prompt": "Create reminders about Python programming topics with a professional and encouraging tone. Focus on practical tips, best practices, and motivational content to support learning and development.",
-    "message_limit": 10,
-    "timezone": "Asia/Kolkata"
-  }},
-  "schedule": {{
-    "name": "Daily Python Programming Reminder",
-    "schedule_type": "daily",
-    "schedule_value": {{"time": "09:00 AM"}},
-    "timezone": "Asia/Kolkata",
-    "reminder_content_prompt_id": null,
-    "notes": null
-  }}
-}}
-
-User: "Remind me weekly every Tuesday at 3pm about team meetings with detailed and formal tone"
-JSON Output:
-{{
-  "config": {{
-    "full_instruction_prompt": "Create reminders about team meetings with a detailed and formal tone. Include relevant preparation tips, agenda items, and professional language suitable for workplace communication.",
-    "message_limit": 10,
-    "timezone": "Asia/Kolkata"
-  }},
-  "schedule": {{
-    "name": "Weekly Team Meeting Reminder",
-    "schedule_type": "weekly",
-    "schedule_value": {{"day_of_week": "Tuesday", "time": "3:00 PM"}},
-    "timezone": "Asia/Kolkata",
-    "reminder_content_prompt_id": null,
-    "notes": null
-  }}
-}}
 
 User Input: {user_input}
 
@@ -106,6 +102,7 @@ class RRuleGenerator:
 
     DAY_MAP = {
         "monday": MO, "mon": MO,
+
         "tuesday": TU, "tue": TU,
         "wednesday": WE, "wed": WE,
         "thursday": TH, "thu": TH,
