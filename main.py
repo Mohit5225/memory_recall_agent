@@ -33,6 +33,10 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Suppress noisy third-party loggers
+logging.getLogger('pymongo').setLevel(logging.WARNING)
+logging.getLogger('motor').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # --- Application Lifespan Management ---

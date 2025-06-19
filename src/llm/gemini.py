@@ -5,8 +5,13 @@ from google.api_core import exceptions
 from src.config.settings import GOOGLE_API_KEY, LLM_MODEL_NAME
 from datetime import datetime
 from typing import Optional, Tuple
+import json
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 genai.configure(api_key=GOOGLE_API_KEY)
 
 async def get_gemini_response_async(prompt: str, message_context: Optional[dict] = None, max_retries: int = 3) -> Tuple[Optional[str], dict]:
@@ -33,6 +38,20 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
     context["last_attempt"] = datetime.utcnow()
     context["processing_status"] = "processing"
     
+    # Debug log the exact prompt and context being sent
+    logger.debug("=== LLM Request Details ===")
+    logger.debug(f"Prompt: {prompt}")
+    if message_context:
+        logger.debug(f"Context: {json.dumps(message_context, indent=2)}")
+    
+    # Create safety config
+    safety_settings = {
+        "HARASSMENT": "BLOCK_MEDIUM_AND_ABOVE",
+        "HATE_SPEECH": "BLOCK_MEDIUM_AND_ABOVE",
+        "SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
+        "DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE"
+    }
+
     for attempt in range(max_retries):
         try:
             if attempt > 0:

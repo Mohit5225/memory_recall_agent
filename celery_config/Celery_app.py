@@ -13,8 +13,22 @@ if project_root not in sys.path:
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# Configure detailed logging with no truncation
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+
+# Configure root logger to not truncate messages
+root_logger = logging.getLogger()
+for handler in root_logger.handlers:
+    handler.formatter._style._fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # Increase the maximum message length (None means no limit)
+    handler._ext_record_factory = lambda **kwargs: logging.LogRecord(**{**kwargs, 'msg': str(kwargs.get('msg'))})
+
 logger = logging.getLogger(__name__)
 
 # Retrieve broker and backend URLs from environment variables, ensuring flexibility
@@ -40,13 +54,22 @@ celery_app01.conf.update(
     task_track_started=True,
     task_time_limit=300,  # Hard limit on task execution
     task_soft_time_limit=240,  # Soft limit before timeout exception
+    
+    # Anti-duplicate processing settings
+    task_acks_late=True,  # Acknowledge tasks only after completion
+    worker_prefetch_multiplier=1,  # Each worker takes only 1 task at a time
+    task_reject_on_worker_lost=True,  # Reject tasks if worker dies
+    
+    worker_log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    worker_task_log_format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    worker_log_color=False  # Disable color to prevent truncation issues
 )
 
 # Celery Beat Settings
 celery_app01.conf.beat_schedule = {
-    'dispatch-due-reminders-every-30-seconds': {
+    'dispatch-due-reminders-every-50-seconds': {
         'task': 'src.task.dispatch_due_reminders',  # Task to run
-        'schedule': 30.0,  # Run every 30 seconds
+        'schedule': 50.0,  # Run every 30 seconds
     },
 }
 celery_app01.conf.timezone = 'UTC'  # Set timezone for scheduled tasks
