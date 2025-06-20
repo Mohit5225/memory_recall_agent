@@ -66,7 +66,7 @@ example schema for config , you should replace the requested information but ado
         '# --- Reminder Style/Manner ---\\n' +
         '# Style: Quick, factual.\\n' +
         '# Tone: witty , uplifting, and engaging.\\n' +
-        '# Length: Max 15-20 sentences.\\n' +
+        '# Length: Max 10 sentences.\\n' +
         '# Timing: 11AM daily\\n' +
         '\\n' +
         '# --- Constraints ---\\n' +

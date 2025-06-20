@@ -169,12 +169,48 @@ async def _clear_processing_status(schedule_id: str, task_id: str):
         logger.error(f"Error clearing processing status: {e}")
 
 def _send_sms_placeholder(to_number: str, message_body: str, schedule_id: str):
-    """Placeholder for sending SMS. In a real app, this would use Twilio."""
-    logger.info(f"[Schedule ID: {schedule_id}] Attempting to send SMS to {to_number}: '{message_body}'")
-    logger.info(f"SMS to {to_number} for schedule {schedule_id} with message '{message_body}' would be sent here.")
-    return True
-
-
+    """Send WhatsApp message via Twilio."""
+    try:
+        from twilio.rest import Client
+        import os
+        
+        # Get credentials from environment variables
+        account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+        twilio_number = os.getenv('TWILIO_WHATSAPP_NUMBER', 'whatsapp:+14155238886')
+        
+        if not account_sid or not auth_token:
+            logger.error("❌ Twilio credentials not found in environment")
+            return False
+            
+        client = Client(account_sid, auth_token)
+          # 🔧 FORCE YOUR NUMBER FOR TESTING
+        actual_number = "+918469043310"  # Always use your number
+          # 🔍 TRUNCATE MESSAGE FOR WHATSAPP LIMITS
+        WHATSAPP_LIMIT = 1600
+        TRUNCATE_SUFFIX = "\n\n[Message truncated for WhatsApp]"
+        if len(message_body) > WHATSAPP_LIMIT:
+            # Reserve space for the suffix
+            max_content_length = WHATSAPP_LIMIT - len(TRUNCATE_SUFFIX)
+            message_body = message_body[:max_content_length] + TRUNCATE_SUFFIX
+        
+        # 🔍 LOG WHAT'S ACTUALLY HAPPENING
+        logger.info(f"[Schedule ID: {schedule_id}] SENDING WhatsApp to {actual_number}")
+        logger.info(f"Message length: {len(message_body)} characters")
+        
+        message = client.messages.create(
+            from_=twilio_number,
+            body=message_body,
+            to=f'whatsapp:{actual_number}'  # Use your actual number
+        )
+        
+        logger.info(f"✅ WhatsApp sent successfully to {actual_number}!")
+        logger.info(f"Message SID: {message.sid}")
+        logger.info(f"Status: {message.status}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ WhatsApp send failed: {e}")
+        return False
 async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_notes: str = None) -> str:
     """
     Generate LLM-powered reminder content based on user's configuration.
@@ -188,7 +224,7 @@ async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_
     
         if not user_config:
             logger.warning(f"No user config found for {user_id}. Using static reminder.")
-            return f"{datetime.now(timezone.utc).strftime('%H:%M')} PM Reminder: {schedule_name}"
+            return f"{datetime.now(timezone.utc).strftime('%H:%M')}  Reminder: {schedule_name}"
 
         current_time = datetime.now(timezone.utc).strftime('%H:%M')
         
@@ -208,7 +244,7 @@ async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_
         1. **Think First**: Analyze the user's configured topic and style preferences
         2. **Be Intelligent**: Use your knowledge to select relevant, interesting content about their topic
         3. **Create Educational Content**: Provide genuine learning value, not just a notification
-        4. **Format**: Start with "{current_time} PM Reminder:" then continue with your content
+        4. **Format**: Start with "{current_time}  Reminder:" then continue with your content
         5. **Length**: Write 25-35 lines of educational content (introduction, explanation, examples, use cases)
         6. **Adapt Your Style**: Match the tone/style specified in their configuration
         7. **Be Specific**: Include concrete examples, methods, concepts, or practical applications
@@ -255,11 +291,11 @@ async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_
                     
         # If we get here, all attempts failed
         logger.error("All LLM generation attempts failed, using fallback")
-        return f"{current_time} PM Reminder: {schedule_name} - Check your learning materials for today's topic."
+        return f"{current_time}  Reminder: {schedule_name} - Check your learning materials for today's topic."
             
     except Exception as e:
         logger.error(f"Error generating reminder content for user {user_id}: {e}", exc_info=True)
-        return f"{datetime.now(timezone.utc).strftime('%H:%M')} PM Reminder: {schedule_name}"
+        return f"{datetime.now(timezone.utc).strftime('%H:%M')}  Reminder: {schedule_name}"
 
 @celery_app01.task(
         name="src.task.send_reminder_notification",
@@ -294,12 +330,9 @@ def send_reminder_notification(self, schedule_id: str):
             if schedule.status != ScheduleStatus.ACTIVE:
                 logger.warning(f"Schedule {schedule_id} ({schedule.name}) is not active (status: {schedule.status}). Skipping reminder.")
                 return
-                
-            # Placeholder: Get user's phone number based on schedule.user_id
-            user_phone_number = "+10000000000" # Example placeholder
-            if hasattr(schedule, 'user_phone_override') and schedule.user_phone_override:
-                user_phone_number = schedule.user_phone_override
-            logger.info(f"User phone for {schedule.user_id} (schedule {schedule_id}): {user_phone_number} (placeholder)")
+                  # 🔧 HARDCODED: Use your actual WhatsApp number
+            user_phone_number = "+918469043310"  # Your verified WhatsApp number
+            logger.info(f"User phone for {schedule.user_id} (schedule {schedule_id}): {user_phone_number} (hardcoded)")
             
             logger.info(f"Preparing to send reminder for schedule: {schedule.name} (ID: {schedule_id}) to user {schedule.user_id}")
             
@@ -307,9 +340,7 @@ def send_reminder_notification(self, schedule_id: str):
             # Use getattr to safely access 'notes' attribute with a default value if it doesn't exist
             schedule_notes = getattr(schedule, 'notes', None)
             reminder_message = await _generate_reminder_content(schedule.user_id, schedule.name, schedule_notes)
-            logger.info(f"Generated reminder content for schedule {schedule_id}: '{reminder_message[:150]}...'")
-            
-            # Send the SMS (using placeholder)
+            logger.info(f"Generated reminder content for schedule {schedule_id}: '{reminder_message[:150]}...'")            # Send the SMS (using placeholder)
             sms_sent_successfully = _send_sms_placeholder(user_phone_number, reminder_message, schedule_id)
 
             if not sms_sent_successfully:
@@ -317,7 +348,7 @@ def send_reminder_notification(self, schedule_id: str):
                 return
                 
             now_utc = datetime.now(timezone.utc)
-            processed_at_time = schedule.next_run_at if schedule.next_run_at else now_utc
+            processed_at_time = now_utc  # Always use current time for last_run_at
             updates = {"last_run_at": processed_at_time}
 
             if schedule.schedule_type == ScheduleType.ONCE:
@@ -330,7 +361,13 @@ def send_reminder_notification(self, schedule_id: str):
                     updates["error_details"] = f"Missing rrule_params for {schedule.schedule_type} schedule"
                 else:
                     logger.info(f"Processing recurring schedule {schedule_id} ({schedule.name}). Type: {schedule.schedule_type}")
-                    current_next_run_at = schedule.next_run_at or datetime.now(timezone.utc)
+                    if schedule.next_run_at:
+                        if schedule.next_run_at.tzinfo is None:
+                            current_next_run_at = schedule.next_run_at.replace(tzinfo=timezone.utc)
+                        else:
+                            current_next_run_at = schedule.next_run_at
+                    else:
+                        current_next_run_at = datetime.now(timezone.utc)
                     
                     try:
                         rrule_gen = RRuleGenerator(schedule.schedule_type.value, schedule.schedule_value)
