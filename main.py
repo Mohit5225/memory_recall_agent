@@ -16,6 +16,9 @@ from src.agent.state import AgentState
 from src.agent.graph import build_agent_graph, save_messages_atomically
 from src.config.constants import DEFAULT_CONTEXT_WINDOW  # Import for consistent context windowing
 
+# Import auth router
+from src.auth.routes import router as auth_router
+
 # Import DB client management functions for startup/shutdown
 from src.db.mongo import (
     get_mongo_client, close_mongo_client, DatabaseError, save_message, get_recent_messages,
@@ -257,3 +260,4 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
 
 # Include router
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(auth_router)  # Auth routes don't need prefix (e.g., /auth/google)

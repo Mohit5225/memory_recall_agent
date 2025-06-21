@@ -5,14 +5,14 @@ from src.db.mongo import get_user_collection
 
 logger = logging.getLogger(__name__)
 
-async def find_user_by_google_sub(google_sub: str) -> Optional[Dict[str, Any]]:
-    """Find user by Google sub (unique identifier)"""
+async def find_user_by_user_id(user_id: str) -> Optional[Dict[str, Any]]:
+    """Find user by user_id (which contains Google's sub)"""
     try:
         collection = await get_user_collection()
-        user = await collection.find_one({"google_sub": google_sub})
+        user = await collection.find_one({"user_id": user_id})
         return user
     except Exception as e:
-        logger.error(f"Error finding user by Google sub {google_sub}: {e}")
+        logger.error(f"Error finding user by user_id {user_id}: {e}")
         return None
 
 async def create_new_user(google_sub: str, email: str, name: str) -> Optional[Dict[str, Any]]:
@@ -21,8 +21,8 @@ async def create_new_user(google_sub: str, email: str, name: str) -> Optional[Di
         collection = await get_user_collection()
         
         user_data = {
-            "google_sub": google_sub,
-            "user_id": name,
+            "user_id": google_sub,  # Primary identifier = Google's sub
+            "display_name": name,   # Display name from Google
             "email": email,
             "roles": ["user"],
             "created_at": datetime.now(timezone.utc),
@@ -48,26 +48,26 @@ async def create_new_user(google_sub: str, email: str, name: str) -> Optional[Di
         logger.error(f"Error creating user {google_sub}: {e}")
         return None
 
-async def update_user_last_login(google_sub: str) -> bool:
+async def update_user_last_login(user_id: str) -> bool:
     """Update user's last login timestamp"""
     try:
         collection = await get_user_collection()
         
         result = await collection.update_one(
-            {"google_sub": google_sub},
+            {"user_id": user_id},
             {"$set": {"last_login": datetime.now(timezone.utc)}}
         )
         
         return result.modified_count > 0
         
     except Exception as e:
-        logger.error(f"Error updating last login for {google_sub}: {e}")
+        logger.error(f"Error updating last login for {user_id}: {e}")
         return False
 
 async def get_or_create_user(google_sub: str, email: str, name: str) -> Optional[Dict[str, Any]]:
     """Get existing user or create new one from Google OAuth data"""
-    # Try to find existing user
-    user = await find_user_by_google_sub(google_sub)
+    # Try to find existing user (user_id contains Google's sub)
+    user = await find_user_by_user_id(google_sub)
     
     if user:
         # Update last login

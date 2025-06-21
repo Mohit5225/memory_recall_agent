@@ -40,12 +40,11 @@ async def google_callback(request: Request, response: Response):
         
         if not user:
             raise HTTPException(status_code=500, detail="Failed to create or retrieve user")
-        
-        # Create JWT token
+          # Create JWT token with user_id = google_sub for consistency
         jwt_token = create_jwt_token(
             google_sub=google_sub,
             email=email,
-            user_id=name,
+            user_id=google_sub,  # user_id = google_sub for system consistency
             roles=user.get('roles', ['user'])
         )
         
@@ -75,14 +74,12 @@ async def get_current_user(request: Request):
     token = request.cookies.get("access_token")
     
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+        raise HTTPException(status_code=401, detail="Not authenticated")    
     try:
         payload = await decode_jwt_token(token)
         return {
-            "google_sub": payload['sub'],
+            "user_id": payload['user_id'],  # This is Google's sub
             "email": payload['email'],
-            "user_id": payload['user_id'],
             "roles": payload['roles']
         }
     except HTTPException:

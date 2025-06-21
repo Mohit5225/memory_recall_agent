@@ -1,6 +1,6 @@
 # src/models/user.py
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
-from typing import Optional, Annotated
+from typing import Optional, Annotated, List
 from bson import ObjectId
 from datetime import datetime, timezone
 
@@ -33,17 +33,27 @@ class UserConfig(BaseModel):
 # Represents the structure of a user document in MongoDB.
 # Uses the custom PyObjectId and the nested UserConfig model.
 class User(BaseModel):
-    """User model with configuration."""
+    """User model with Google OAuth integration."""
     # Map MongoDB's _id to a Pydantic field named 'id'
-    # Use the custom PyObjectId type for correct handling
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-
-    # Our application-level unique identifier
-    # Review suggested renaming (username, email), but user_id is clear for now
-    user_id: str = Field(..., description="Unique identifier for the user")
-
+      # Primary user identifier - uses Google's sub for consistency across the system
+    user_id: str = Field(..., description="Google's unique user identifier (sub) - used as primary key")
+    
+    # Display name from Google (can have duplicates, used for UI)
+    display_name: str = Field(..., description="Display name from Google profile")
+    
+    # User's email from Google
+    email: str = Field(..., description="User's email from Google")
+    
+    # Auth and profile fields
+    roles: List[str] = Field(default_factory=lambda: ["user"])
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_login: Optional[datetime] = None
+    
     # Embed configuration using the dedicated UserConfig model
     config: UserConfig = Field(default_factory=UserConfig)
+
 
     # Future fields for auth and user profile (as suggested by review):
     # email: Optional[str] = None
