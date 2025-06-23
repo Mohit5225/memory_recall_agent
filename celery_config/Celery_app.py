@@ -69,7 +69,7 @@ celery_app01.conf.update(
 celery_app01.conf.beat_schedule = {
     'dispatch-due-reminders-every-50-seconds': {
         'task': 'src.task.dispatch_due_reminders',  # Task to run
-        'schedule': 50.0,  # Run every 30 seconds
+        'schedule': 50.0,  # Run every 50 seconds
     },
 }
 celery_app01.conf.timezone = 'UTC'  # Set timezone for scheduled tasks

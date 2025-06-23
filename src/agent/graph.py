@@ -158,7 +158,7 @@ async def call_intent_parser(state: AgentState) -> AgentState:
     context_window = state.get('context_window', CLARIFICATION_CONTEXT)
     message_history = format_message_history(messages, context_window)
     
-    parsed_intent = await parse_user_intent(state['user_input'], state, message_history)
+    parsed_intent = await parse_user_intent(state['user_input'], dict(state), message_history)
     logger.info(f"Intent Parsing Node identified intent: '{parsed_intent}'")
     
     state['parsed_intent'] = parsed_intent or "other"

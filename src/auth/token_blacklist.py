@@ -236,9 +236,9 @@ class TokenBlacklist:
             
             if not revocation_time_str:
                 return False
-            
+
             revocation_time = datetime.fromisoformat(revocation_time_str)
-            
+
             # If user revocation happened after token was issued, token is invalid
             if revocation_time > token_issued_at:
                 logger.info(f"User {user_sub} tokens revoked after token issuance")

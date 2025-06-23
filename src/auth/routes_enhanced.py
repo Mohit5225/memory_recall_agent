@@ -1,14 +1,13 @@
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuthError
-import json
+
 from .oauth import google_oauth
 from .jwt_utils import (
-    create_jwt_token, decode_jwt_token, create_mock_jwt_token, 
+    create_jwt_token, decode_jwt_token, create_mock_jwt_token,
     JWT_EXPIRATION_DAYS, revoke_token_from_request, revoke_all_user_tokens_safe
 )
 from .user_service import get_or_create_user
@@ -42,10 +41,10 @@ async def google_login(request: Request):
         
         # Generate and store CSRF state token
         state = secrets.token_urlsafe(32)
-          # Enhanced authorization with state parameter
+        
+        # Enhanced authorization with state parameter
         redirect_uri = request.url_for('google_callback')
-        google_client = cast(Any, google_oauth.google)
-        authorization_url = await google_client.create_authorization_url(
+        authorization_url = await google_oauth.google.create_authorization_url(
             redirect_uri,
             state=state,
             # Additional security parameters
@@ -73,16 +72,15 @@ async def google_callback(request: Request, response: Response):
     client_ip = get_client_ip(request)
     
     try:
-        # Get token from Google with type casting for dynamic attribute
-        google_client = cast(Any, google_oauth.google)
-        token = await google_client.authorize_access_token(request)
-        user_info = await google_client.get('userinfo', token=token)
-        user_data: Dict[str, Any] = user_info.json()  # Explicit type annotation
+        # Get token from Google
+        token = await google_oauth.google.authorize_access_token(request)
+        user_info = await google_oauth.google.get('userinfo', token=token)
+        user_data = user_info.json()
         
         # Extract essential user information
-        google_sub: Optional[str] = user_data.get('sub')
-        email: Optional[str] = user_data.get('email')
-        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        google_sub = user_data.get('sub')
+        email = user_data.get('email')
+        name = user_data.get('name', email.split('@')[0] if email else 'Unknown')
         
         if not google_sub or not email:
             log_security_event(
@@ -175,51 +173,62 @@ async def google_callback(request: Request, response: Response):
         )
         logger.error(f"Authentication system error: {e}")
         raise HTTPException(status_code=500, detail="Authentication service error")
-        
-         
+
 @router.get("/me")
 async def get_current_user(request: Request):
-    """Get current user info from JWT cookie"""
-    token = request.cookies.get("access_token")
-    
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")    
+    """Get current authenticated user information"""
     try:
-        payload = await decode_jwt_token(token)
-        return {
-            "user_id": payload['user_id'],  # This is Google's sub
-            "email": payload['email'],
-            "roles": payload['roles']
+        from .jwt_utils import get_current_user_from_token
+        user = await get_current_user_from_token(request)
+        
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        # Return safe user information (exclude sensitive data)
+        safe_user_data = {
+            "user_id": user.get("user_id"),
+            "email": user.get("email"),
+            "google_sub": user.get("google_sub"),
+            "roles": user.get("roles", ["user"]),
+            "iat": user.get("iat"),
+            "exp": user.get("exp")
         }
+        
+        return {"user": safe_user_data}
+        
     except HTTPException:
         raise
+    except Exception as e:
+        logger.error(f"Get current user failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user information")
 
 @router.post("/logout")
 async def logout(request: Request):
-    """Logout user by revoking token and clearing cookie"""
+    """Logout user and revoke token"""
     try:
-        # Revoke the token server-side
-        revoked = await revoke_token_from_request(request)
+        # Revoke the current token
+        success = await revoke_token_from_request(request)
         
-        # Clear cookie regardless of revocation success
+        # Create response with cleared cookie
         response = Response(
-            content='{"message": "Logged out successfully"}', 
+            content='{"message": "Successfully logged out"}',
             media_type="application/json"
         )
         response.delete_cookie("access_token")
         
-        if revoked:
-            logger.info("Token successfully revoked and cookie cleared")
-        else:
-            logger.warning("Failed to revoke token, but cookie cleared")
+        if success:
+            log_security_event(
+                "USER_LOGOUT",
+                {"ip": get_client_ip(request)},
+            )
         
         return response
-        
+            
     except Exception as e:
-        logger.error(f"Logout error: {e}")
+        logger.error(f"Logout failed: {e}")
         # Still clear cookie even if revocation fails
         response = Response(
-            content='{"message": "Logged out (with errors)"}', 
+            content='{"message": "Logged out (with errors)"}',
             media_type="application/json"
         )
         response.delete_cookie("access_token")
@@ -227,62 +236,72 @@ async def logout(request: Request):
 
 @router.get("/mock-login")
 async def mock_login(user: str, response: Response):
-    """Mock login for development (creates fake JWT + cookie)"""
+    """Mock login for development/testing only"""
     if not user:
         raise HTTPException(status_code=400, detail="User parameter required")
     
     # Create mock JWT token
-    jwt_token = create_mock_jwt_token(user)
+    mock_token = create_mock_jwt_token(user)
     
     # Set cookie
     response.set_cookie(
         key="access_token",
-        value=jwt_token,
+        value=mock_token,
         httponly=True,
-        secure=False,  # False for development
+        secure=False,
         samesite="lax",
         max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60
     )
     
-    return {"message": f"Mock login successful for {user}", "token_set": True}
+    log_security_event(
+        "MOCK_LOGIN",
+        {"user": user},
+        "WARNING"  # Mark as warning since this is for dev only
+    )
+    
+    return {"message": f"Mock login successful for user: {user}"}
 
 @router.post("/revoke-all-tokens")
 async def revoke_all_user_tokens_endpoint(request: Request):
-    """Emergency endpoint to revoke all tokens for current user with fail-safe handling"""
-    token = request.cookies.get("access_token")
-    
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    """Revoke all tokens for the current user"""
     try:
-        # Get user info from current token
-        payload = await decode_jwt_token(token, check_blacklist=False)  # Skip blacklist check for this operation
-        user_sub = payload['sub']
+        from .jwt_utils import get_current_user_from_token
+        user = await get_current_user_from_token(request)
         
-        # Attempt to revoke all tokens with safe error handling
-        result = await revoke_all_user_tokens_safe(user_sub)
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
         
-        # Clear current cookie regardless of revocation success
+        google_sub = user.get("google_sub")
+        if not google_sub:
+            raise HTTPException(status_code=400, detail="Invalid user data")
+        
+        result = await revoke_all_user_tokens_safe(google_sub)
+        
+        # Clear current cookie
         response = Response(
-            content=f'{{"success": {str(result["success"]).lower()}, "message": "{result["message"]}", "affected_tokens": {result["revoked_count"]}}}',
+            content=f'{{"success": {str(result["success"]).lower()}, "message": "{result["message"]}", "affected_tokens": {result.get("revoked_count", 0)}}}',
             media_type="application/json"
         )
         response.delete_cookie("access_token")
         
-        if result["success"]:
-            logger.info(f"All tokens successfully revoked for user {user_sub}")
-        else:
-            logger.warning(f"Token revocation failed for user {user_sub}: {result.get('error', 'Unknown error')}")
+        log_security_event(
+            "TOKEN_REVOCATION_ALL",
+            {
+                "ip": get_client_ip(request),
+                "google_sub": google_sub,
+                "success": result.get("success", False)
+            }
+        )
         
         return response
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to revoke all tokens: {e}")
-        # Still clear cookie even if everything fails
+        logger.error(f"Token revocation failed: {e}")
+        # Still clear cookie
         response = Response(
-            content='{"success": false, "message": "Token revocation service error - please change password and re-login", "affected_tokens": 0}',
+            content='{"success": false, "message": "Token revocation service error", "affected_tokens": 0}',
             media_type="application/json"
         )
         response.delete_cookie("access_token")
@@ -292,20 +311,36 @@ async def revoke_all_user_tokens_endpoint(request: Request):
 async def auth_health_check():
     """Health check endpoint for authentication service"""
     try:
-        # Check Redis connection
-        redis_status = token_blacklist._check_redis_health()
+        # Check token blacklist health
+        blacklist_healthy = True
+        try:
+            # Test blacklist functionality
+            test_result = await token_blacklist.is_token_revoked("health-check-token")
+            if test_result is None:
+                blacklist_healthy = False
+        except Exception:
+            blacklist_healthy = False
         
-        return {
-            "status": "healthy" if redis_status else "degraded",
-            "redis_available": redis_status,
-            "fail_secure_mode": token_blacklist.fail_secure,
-            "warning": None if redis_status else "Redis unavailable - authentication will fail in fail-secure mode"
+        health_status = {
+            "status": "healthy" if blacklist_healthy else "degraded",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "components": {
+                "token_blacklist": "healthy" if blacklist_healthy else "unhealthy",
+                "oauth_provider": "healthy"  # Assume healthy if we can import
+            }
         }
+        
+        status_code = 200 if blacklist_healthy else 503
+        return Response(
+            content=str(health_status),
+            status_code=status_code,
+            media_type="application/json"
+        )
+        
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "redis_available": False,
-            "fail_secure_mode": token_blacklist.fail_secure,
-            "error": str(e)
-        }
+        return Response(
+            content='{"status": "unhealthy", "error": "Health check failed"}',
+            status_code=503,
+            media_type="application/json"
+        )
