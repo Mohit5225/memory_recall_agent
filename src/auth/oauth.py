@@ -10,6 +10,8 @@ oauth = OAuth()
 
 def setup_google_oauth() -> OAuth:
     """Initialize Google OAuth client with enhanced security scopes"""
+def setup_google_oauth() -> OAuth:
+    """Initialize Google OAuth client with enhanced security scopes"""
     oauth.register(
         name='google',
         client_id=os.getenv('GOOGLE_OAUTH_CLIENT_ID'),
@@ -26,8 +28,22 @@ def setup_google_oauth() -> OAuth:
             # Request additional claims for security
             'claims': '{"userinfo":{"email_verified":{"essential":true}}}'
         }
+        client_kwargs={
+            'scope': 'openid email profile',
+            # Enhanced security parameters
+            'access_type': 'offline',
+            'prompt': 'consent',
+            'include_granted_scopes': 'true',
+            # Request additional claims for security
+            'claims': '{"userinfo":{"email_verified":{"essential":true}}}'
+        }
     )
     return oauth
 
 # Initialize OAuth on module import
 google_oauth = setup_google_oauth()
+
+# Type-safe accessor for the google client
+def get_google_client() -> GoogleOAuthClient:
+    """Get the Google OAuth client with proper typing"""
+    return getattr(google_oauth, 'google')  # type: ignore

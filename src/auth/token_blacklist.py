@@ -221,8 +221,7 @@ class TokenBlacklist:
                  
         Raises:
             RedisConnectionError: If Redis is unavailable and fail_secure=True
-        """
-        if not self._check_redis_health():
+        """        if not self._check_redis_health():
             if self.fail_secure:
                 logger.warning(f"Redis unavailable - DENYING access for user {user_sub} (fail-secure mode)")
                 raise RedisConnectionError("Cannot verify user tokens: Redis is unavailable")
@@ -236,9 +235,9 @@ class TokenBlacklist:
             
             if not revocation_time_str:
                 return False
-
+            
             revocation_time = datetime.fromisoformat(revocation_time_str)
-
+            
             # If user revocation happened after token was issued, token is invalid
             if revocation_time > token_issued_at:
                 logger.info(f"User {user_sub} tokens revoked after token issuance")

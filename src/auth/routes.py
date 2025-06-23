@@ -2,6 +2,9 @@ import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, cast
+import secrets
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuthError
@@ -13,6 +16,10 @@ from .jwt_utils import (
 )
 from .user_service import get_or_create_user
 from .token_blacklist import token_blacklist, RedisConnectionError
+from .security_utils import (
+    validate_email_security, check_rate_limit, get_client_ip,
+    log_security_event, enhance_user_data_security, SecurityValidationError
+)
 from .security_utils import (
     validate_email_security, check_rate_limit, get_client_ip,
     log_security_event, enhance_user_data_security, SecurityValidationError
@@ -72,6 +79,9 @@ async def google_callback(request: Request, response: Response):
     """Handle Google OAuth callback with comprehensive security validation"""
     client_ip = get_client_ip(request)
     
+    """Handle Google OAuth callback with comprehensive security validation"""
+    client_ip = get_client_ip(request)
+    
     try:
         # Get token from Google with type casting for dynamic attribute
         google_client = cast(Any, google_oauth.google)
@@ -79,6 +89,40 @@ async def google_callback(request: Request, response: Response):
         user_info = await google_client.get('userinfo', token=token)
         user_data: Dict[str, Any] = user_info.json()  # Explicit type annotation
         
+        # Extract essential user information
+        google_sub: Optional[str] = user_data.get('sub')
+        email: Optional[str] = user_data.get('email')
+        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        
+        if not google_sub or not email:
+            log_security_event(
+                "OAUTH_INCOMPLETE_DATA",
+                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_data.get(k)]},
+                "WARNING"
+            )
+            raise HTTPException(status_code=400, detail="Incomplete user data from OAuth provider")
+        
+        # Comprehensive security validation
+        try:
+            validate_email_security(email, user_data)
+        except SecurityValidationError as e:
+            log_security_event(
+                "OAUTH_SECURITY_VIOLATION",
+                {
+                    "ip": client_ip, 
+                    "email": email, 
+                    "reason": str(e),
+                    "user_data": {
+                        "email_verified": user_data.get('email_verified', False),
+                        "domain": email.split('@')[-1] if '@' in email else None
+                    }
+                },
+                "WARNING"
+            )
+            raise HTTPException(status_code=403, detail=str(e))
+        
+        # Enhance user data with security metadata
+        enhanced_user_data = enhance_user_data_security(user_data)
         # Extract essential user information
         google_sub: Optional[str] = user_data.get('sub')
         email: Optional[str] = user_data.get('email')
@@ -123,7 +167,14 @@ async def google_callback(request: Request, response: Response):
                 {"ip": client_ip, "email": email, "google_sub": google_sub},
                 "ERROR"
             )
+            log_security_event(
+                "USER_CREATION_FAILED",
+                {"ip": client_ip, "email": email, "google_sub": google_sub},
+                "ERROR"
+            )
             raise HTTPException(status_code=500, detail="Failed to create or retrieve user")
+        
+        # Create JWT token with enhanced claims
         
         # Create JWT token with enhanced claims
         jwt_token = create_jwt_token(
@@ -147,17 +198,38 @@ async def google_callback(request: Request, response: Response):
         # Set secure cookie and redirect
         success_response = Response("✅ Login successful! You can close this window.")
         success_response.set_cookie(
+        # Log successful authentication
+        log_security_event(
+            "OAUTH_SUCCESS",
+            {
+                "ip": client_ip,
+                "email": email,
+                "google_sub": google_sub,
+                "email_verified": user_data.get('email_verified', False)
+            }
+        )
+        
+        # Set secure cookie and redirect
+        success_response = Response("✅ Login successful! You can close this window.")
+        success_response.set_cookie(
             key="access_token",
             value=jwt_token,
             httponly=True,
+            secure=False,  # Set to True in production with HTTPS
             secure=False,  # Set to True in production with HTTPS
             samesite="lax",
             max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60
         )
         
         return success_response
+        return success_response
         
     except OAuthError as e:
+        log_security_event(
+            "OAUTH_ERROR",
+            {"ip": client_ip, "error": str(e)},
+            "WARNING"
+        )
         log_security_event(
             "OAUTH_ERROR",
             {"ip": client_ip, "error": str(e)},
@@ -167,7 +239,19 @@ async def google_callback(request: Request, response: Response):
         raise HTTPException(status_code=400, detail=f"OAuth authentication failed: {str(e)}")
     except HTTPException:
         raise  # Re-raise HTTP exceptions
+        raise HTTPException(status_code=400, detail=f"OAuth authentication failed: {str(e)}")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
+        log_security_event(
+            "OAUTH_SYSTEM_ERROR",
+            {"ip": client_ip, "error": str(e)},
+            "ERROR"
+        )
+        logger.error(f"Authentication system error: {e}")
+        raise HTTPException(status_code=500, detail="Authentication service error")
+        
+         
         log_security_event(
             "OAUTH_SYSTEM_ERROR",
             {"ip": client_ip, "error": str(e)},
