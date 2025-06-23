@@ -15,6 +15,13 @@ MONGODB_CONNECTION_STRING = os.getenv("MONGODB_CONNECTION_STRING")
 DB_NAME = os.getenv("DB_NAME", "your_llm_agent_db") # Default DB name if not in .env
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "user_settings") # Default Collection name
 
+# --- OAuth Security Settings ---
+OAUTH_REQUIRE_EMAIL_VERIFICATION = os.getenv("OAUTH_REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
+OAUTH_BLOCK_DISPOSABLE_EMAILS = os.getenv("OAUTH_BLOCK_DISPOSABLE_EMAILS", "true").lower() == "true"
+OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv("OAUTH_ALLOWED_DOMAINS", "").split(",") if domain.strip()]
+OAUTH_MAX_LOGIN_ATTEMPTS = int(os.getenv("OAUTH_MAX_LOGIN_ATTEMPTS", "5"))
+OAUTH_RATE_LIMIT_WINDOW = int(os.getenv("OAUTH_RATE_LIMIT_WINDOW", "300"))  # 5 minutes
+
 # --- LLM Settings ---
 # You could add model names, temperatures etc. here later
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-1.5-flash") # Default LLM model
