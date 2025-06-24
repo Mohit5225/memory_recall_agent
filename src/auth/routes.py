@@ -1,8 +1,14 @@
 import logging
+import secrets
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, cast
+import secrets
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, cast
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuthError
-
+import json
 from .oauth import google_oauth
 from .jwt_utils import (
     create_jwt_token, decode_jwt_token, create_mock_jwt_token, 
@@ -10,6 +16,14 @@ from .jwt_utils import (
 )
 from .user_service import get_or_create_user
 from .token_blacklist import token_blacklist, RedisConnectionError
+from .security_utils import (
+    validate_email_security, check_rate_limit, get_client_ip,
+    log_security_event, enhance_user_data_security, SecurityValidationError
+)
+from .security_utils import (
+    validate_email_security, check_rate_limit, get_client_ip,
+    log_security_event, enhance_user_data_security, SecurityValidationError
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,29 +32,151 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 
 @router.get("/google")
 async def google_login(request: Request):
-    """Start Google OAuth login"""
-    redirect_uri = "http://localhost:8000/auth/google/callback"
-    return await google_oauth.google.authorize_redirect(request, redirect_uri)
+    """Initiate Google OAuth login with enhanced security"""
+    try:
+        # Rate limiting check
+        client_ip = get_client_ip(request)
+        if not check_rate_limit(client_ip):
+            log_security_event(
+                "RATE_LIMIT_EXCEEDED", 
+                {"ip": client_ip, "endpoint": "/auth/google"},
+                "WARNING"
+            )
+            raise HTTPException(
+                status_code=429, 
+                detail="Too many login attempts. Please try again later."
+            )
+        
+        # Generate and store CSRF state token
+        state = secrets.token_urlsafe(32)
+          # Enhanced authorization with state parameter
+        redirect_uri = request.url_for('google_callback')
+        google_client = cast(Any, google_oauth.google)
+        authorization_url = await google_client.create_authorization_url(
+            redirect_uri,
+            state=state,
+            # Additional security parameters
+            access_type='offline',
+            prompt='consent',
+            include_granted_scopes='true'
+        )
+        
+        log_security_event(
+            "OAUTH_INITIATION", 
+            {"ip": client_ip, "provider": "google"}
+        )
+        
+        return RedirectResponse(authorization_url)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OAuth initiation failed: {e}")
+        raise HTTPException(status_code=500, detail="Authentication service unavailable")
 
 @router.get("/google/callback")
 async def google_callback(request: Request, response: Response):
-    """Handle Google OAuth callback"""
+    """Handle Google OAuth callback with comprehensive security validation"""
+    client_ip = get_client_ip(request)
+    
+    """Handle Google OAuth callback with comprehensive security validation"""
+    client_ip = get_client_ip(request)
+    
     try:
-        # Get token from Google
-        token = await google_oauth.google.authorize_access_token(request)
-        user_info = await google_oauth.google.get('userinfo', token=token)
-        user_data = user_info.json()
+        # Get token from Google with type casting for dynamic attribute
+        google_client = cast(Any, google_oauth.google)
+        token = await google_client.authorize_access_token(request)
+        user_info = await google_client.get('userinfo', token=token)
+        user_data: Dict[str, Any] = user_info.json()  # Explicit type annotation
         
-        google_sub = user_data['sub']
-        email = user_data['email']
-        name = user_data.get('name', email.split('@')[0])
+        # Extract essential user information
+        google_sub: Optional[str] = user_data.get('sub')
+        email: Optional[str] = user_data.get('email')
+        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        
+        if not google_sub or not email:
+            log_security_event(
+                "OAUTH_INCOMPLETE_DATA",
+                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_data.get(k)]},
+                "WARNING"
+            )
+            raise HTTPException(status_code=400, detail="Incomplete user data from OAuth provider")
+        
+        # Comprehensive security validation
+        try:
+            validate_email_security(email, user_data)
+        except SecurityValidationError as e:
+            log_security_event(
+                "OAUTH_SECURITY_VIOLATION",
+                {
+                    "ip": client_ip, 
+                    "email": email, 
+                    "reason": str(e),
+                    "user_data": {
+                        "email_verified": user_data.get('email_verified', False),
+                        "domain": email.split('@')[-1] if '@' in email else None
+                    }
+                },
+                "WARNING"
+            )
+            raise HTTPException(status_code=403, detail=str(e))
+        
+        # Enhance user data with security metadata
+        enhanced_user_data = enhance_user_data_security(user_data)
+        # Extract essential user information
+        google_sub: Optional[str] = user_data.get('sub')
+        email: Optional[str] = user_data.get('email')
+        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        
+        if not google_sub or not email:
+            log_security_event(
+                "OAUTH_INCOMPLETE_DATA",
+                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_data.get(k)]},
+                "WARNING"
+            )
+            raise HTTPException(status_code=400, detail="Incomplete user data from OAuth provider")
+        
+        # Comprehensive security validation
+        try:
+            validate_email_security(email, user_data)
+        except SecurityValidationError as e:
+            log_security_event(
+                "OAUTH_SECURITY_VIOLATION",
+                {
+                    "ip": client_ip, 
+                    "email": email, 
+                    "reason": str(e),
+                    "user_data": {
+                        "email_verified": user_data.get('email_verified', False),
+                        "domain": email.split('@')[-1] if '@' in email else None
+                    }
+                },
+                "WARNING"
+            )
+            raise HTTPException(status_code=403, detail=str(e))
+        
+        # Enhance user data with security metadata
+        enhanced_user_data = enhance_user_data_security(user_data)
         
         # Get or create user
         user = await get_or_create_user(google_sub, email, name)
         
         if not user:
+            log_security_event(
+                "USER_CREATION_FAILED",
+                {"ip": client_ip, "email": email, "google_sub": google_sub},
+                "ERROR"
+            )
+            log_security_event(
+                "USER_CREATION_FAILED",
+                {"ip": client_ip, "email": email, "google_sub": google_sub},
+                "ERROR"
+            )
             raise HTTPException(status_code=500, detail="Failed to create or retrieve user")
-          # Create JWT token with user_id = google_sub for consistency
+        
+        # Create JWT token with enhanced claims
+        
+        # Create JWT token with enhanced claims
         jwt_token = create_jwt_token(
             google_sub=google_sub,
             email=email,
@@ -48,25 +184,57 @@ async def google_callback(request: Request, response: Response):
             roles=user.get('roles', ['user'])
         )
         
-        # Set cookie and redirect
-        response = Response("Login successful! You can close this window.")
-        response.set_cookie(
+        # Log successful authentication
+        log_security_event(
+            "OAUTH_SUCCESS",
+            {
+                "ip": client_ip,
+                "email": email,
+                "google_sub": google_sub,
+                "email_verified": user_data.get('email_verified', False)
+            }
+        )
+        
+        # Set secure cookie and redirect
+    
+        # Log successful authentication
+        
+        # Set secure cookie and redirect
+        success_response = Response("✅ Login successful! You can close this window.")
+        success_response.set_cookie(
             key="access_token",
             value=jwt_token,
             httponly=True,
-            secure=False,  # Set to True in production
+            secure=False,  # Set to True in production with HTTPS
             samesite="lax",
             max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60
         )
         
-        return response
+        return success_response
         
     except OAuthError as e:
+        log_security_event(
+            "OAUTH_ERROR",
+            {"ip": client_ip, "error": str(e)},
+            "WARNING"
+        )
+        log_security_event(
+            "OAUTH_ERROR",
+            {"ip": client_ip, "error": str(e)},
+            "WARNING"
+        )
         logger.error(f"OAuth error: {e}")
-        raise HTTPException(status_code=400, detail=f"OAuth error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"OAuth authentication failed: {str(e)}")
     except Exception as e:
-        logger.error(f"Authentication failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
+        # Handle non-HTTPException, non-OAuthError cases (e.g., database errors)
+        log_security_event(
+            "OAUTH_SYSTEM_ERROR",
+            {"ip": client_ip, "error": str(e)},
+            "ERROR"
+        )
+        logger.error(f"Authentication system error: {e}")
+        raise HTTPException(status_code=500, detail="Authentication service error")
+    
 
 @router.get("/me")
 async def get_current_user(request: Request):

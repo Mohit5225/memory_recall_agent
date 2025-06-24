@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # --- Custom Exception for Clarification Needed ---
 class ScheduleClarificationNeeded(Exception):
     """Custom exception raised when more information is needed to define a schedule."""
-    def __init__(self, message: str, missing_field: str, clarification_prompt_key: str = None):
+    def __init__(self, message: str, missing_field: str, clarification_prompt_key: Optional[str] = None):
         super().__init__(message)
         self.message = message  # Store message as instance attribute
         self.missing_field = missing_field
@@ -273,7 +273,7 @@ class RRuleGenerator:
             # Parse time if provided
             time_str = self.schedule_value.get("time")
             if time_str:
-                hour, minute, second = self.parse_time_string(time_str)
+                hour, minute, second = self._parse_time(time_str)
             else:
                 hour, minute, second = None, None, None
             
@@ -386,7 +386,7 @@ class RRuleGenerator:
         logger.debug(f"Generated rrule_params for type {self.schedule_type}: {rrule_params}")
         return rrule_params
 
-    def calculate_initial_next_run_at(self, start_time: datetime = None) -> datetime:
+    def calculate_initial_next_run_at(self, start_time: Optional[datetime] = None) -> datetime:
         """
         Calculates the initial next_run_at timestamp based on rrule_params and timezone.
         For 'once' schedules, directly parses the datetime.
@@ -412,7 +412,7 @@ class RRuleGenerator:
                     clarification_prompt_key="missing_date_time_for_once"
                 )
             
-            parsed_dt_local = dateparser.parse(combined_datetime_str, settings={'TIMEZONE': self.user_tz.zone, 'RETURN_AS_TIMEZONE_AWARE': True})
+            parsed_dt_local = dateparser.parse(combined_datetime_str, settings={'TIMEZONE': self.user_timezone_str})
 
             if parsed_dt_local:
                 # Ensure the parsed time is in the future for 'once' events

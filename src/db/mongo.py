@@ -2,7 +2,7 @@ import logging
 from typing import Optional, Tuple, List, Dict, Any, Union
 from datetime import datetime, timezone
 from bson import ObjectId
-
+from typing import cast, Literal
 # --- New Motor Imports ---
 import motor.motor_asyncio
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
@@ -80,7 +80,9 @@ async def get_mongo_db() -> motor.motor_asyncio.AsyncIOMotorDatabase:
     try:
         # Await the asynchronous client getter
         client = await get_mongo_client() 
-
+        if client is None:
+            logger.error("MongoDB client is not initialized. Cannot access database.")
+            raise DatabaseError("MongoDB client is not initialized. Cannot access database.")
         db = client[DB_NAME]
 
         # --- Ensure Indexes Exist (Asynchronously) ---
@@ -211,6 +213,9 @@ async def find_schedules_for_dispatch(now_utc: Optional[datetime] = None) -> Lis
 async def get_messages_collection() -> AsyncIOMotorCollection:
     """Get a reference to the dedicated messages collection and ensure indexes exist."""
     client = await get_mongo_client()
+    if client is None:
+        logger.error("MongoDB client is not initialized. Cannot access messages collection.")
+        raise DatabaseError("MongoDB client is not initialized. Cannot access messages collection.")
     collection = client[DB_NAME]["messages"]
     
     # Check if indexes exist and create them if needed
@@ -265,7 +270,7 @@ async def ensure_message_indexes():
         raise DatabaseError(f"Failed to create message indexes: {e}")
 
 @with_retry()
-async def save_message(user_id: str, message_content: str, role: str, context: dict = None) -> bool:
+async def save_message(user_id: str, message_content: str, role: str, context: Optional[dict] = None) -> bool:
     """
     Saves a new message using the dedicated messages collection with transaction support.
     Returns True on success, False on operational failure, raises DatabaseError on critical errors.
@@ -278,7 +283,7 @@ async def save_message(user_id: str, message_content: str, role: str, context: d
         message_obj = Message(
             user_id=user_id,
             content=message_content,
-            role=role,
+            role = cast(Literal["user", "assistant"], role),
             timestamp=datetime.utcnow(),
             context=context or {},
             processing_status=ProcessingStatus.PENDING
@@ -288,6 +293,9 @@ async def save_message(user_id: str, message_content: str, role: str, context: d
         message_dict = message_obj.model_dump()
         
         # Use a session for atomicity
+        if not _mongo_client:
+            logger.error("MongoDB client is not initialized. Cannot save message.")
+            raise DatabaseError("MongoDB client is not initialized. Cannot save message.")
         async with await _mongo_client.start_session() as session:
             async with session.start_transaction():
                 result = await collection.insert_one(message_dict, session=session)
@@ -355,6 +363,10 @@ async def prune_old_messages(user_id: str, keep_count: int = 100) -> bool:
         db = await get_mongo_db()
         collection = await get_messages_collection()
         
+ 
+        if not _mongo_client:
+            logger.error("MongoDB client is not initialized. Cannot prune messages.")
+            raise DatabaseError("MongoDB client is not initialized. Cannot prune messages.")
         async with await _mongo_client.start_session() as session:
             async with session.start_transaction():
                 # Get total count and verify if pruning is needed
@@ -722,7 +734,7 @@ async def update_message_status(
     user_id: str, 
     message_id: str, 
     new_status: ProcessingStatus,
-    error_details: str = None
+    error_details: Optional[str] = None
 ) -> bool:
     """
     Updates the processing status of a message with transaction support.
@@ -730,13 +742,15 @@ async def update_message_status(
     """
     try:
         collection = await get_messages_collection()
-        
+        if not _mongo_client:
+            logger.error("MongoDB client is not initialized. Cannot update message status.")
+            raise DatabaseError("MongoDB client is not initialized. Cannot update message status.")
         async with await _mongo_client.start_session() as session:
             async with session.start_transaction():
                 update_data = {
                     "$set": {
                         "processing_status": new_status,
-                        "processing_attempts": {"$add": ["$processing_attempts", 1]},
+                        "processing_attempts": {"$inc": ["$processing_attempts", 1]},
                         "last_attempt": datetime.utcnow()
                     }
                 }

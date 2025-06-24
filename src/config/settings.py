@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,8 +25,8 @@ LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-1.5-flash") # Default LLM m
 # --- Redis Settings for Celery ---
 REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
-# Optional: REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
-# Optional: REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
+REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
 
 
 # Celery Broker and Backend URL (using Redis)
@@ -35,7 +36,14 @@ CELERY_BROKER_URL: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PO
 CELERY_RESULT_BACKEND: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/0") # Same as broker for simplicity
 
 
-# --- Twilio Settings (Future) ---
-# TWILIO_ACCOUNT_SID: Optional[str] = os.getenv("TWILIO_ACCOUNT_SID")
-# TWILIO_AUTH_TOKEN: Optional[str] = os.getenv("TWILIO_AUTH_TOKEN")
-# TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")  
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")   
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")  
+
+
+# --- OAuth Security Settings ---
+OAUTH_REQUIRE_EMAIL_VERIFICATION = os.getenv("OAUTH_REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
+OAUTH_BLOCK_DISPOSABLE_EMAILS = os.getenv("OAUTH_BLOCK_DISPOSABLE_EMAILS", "true").lower() == "true"
+OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv("OAUTH_ALLOWED_DOMAINS", "").split(",") if domain.strip()]
+OAUTH_MAX_LOGIN_ATTEMPTS = int(os.getenv("OAUTH_MAX_LOGIN_ATTEMPTS", "5"))
+OAUTH_RATE_LIMIT_WINDOW = int(os.getenv("OAUTH_RATE_LIMIT_WINDOW", "300"))  # 5 minutes

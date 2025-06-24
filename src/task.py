@@ -198,20 +198,30 @@ def _send_sms_placeholder(to_number: str, message_body: str, schedule_id: str):
         logger.info(f"[Schedule ID: {schedule_id}] SENDING WhatsApp to {actual_number}")
         logger.info(f"Message length: {len(message_body)} characters")
         
-        message = client.messages.create(
-            from_=twilio_number,
-            body=message_body,
-            to=f'whatsapp:{actual_number}'  # Use your actual number
-        )
-        
-        logger.info(f"✅ WhatsApp sent successfully to {actual_number}!")
-        logger.info(f"Message SID: {message.sid}")
-        logger.info(f"Status: {message.status}")
-        return True
+        try:
+            message = client.messages.create(
+                from_=twilio_number,
+                body=message_body,
+                to=f'whatsapp:{actual_number}'  # Use your actual number
+            )
+            # --- Log Twilio API response details ---
+            logger.info(f"Twilio message SID: {message.sid}")
+            logger.info(f"Twilio message status: {message.status}")
+            if getattr(message, 'error_code', None):
+                logger.error(f"Twilio error code: {message.error_code}")
+                logger.error(f"Twilio error message: {message.error_message}")
+            else:
+                logger.info("No Twilio error code returned.")
+            return True
+        except Exception as twilio_exc:
+            logger.error(f"❌ Exception during Twilio send: {twilio_exc}", exc_info=True)
+            return False
     except Exception as e:
-        logger.error(f"❌ WhatsApp send failed: {e}")
+        logger.error(f"❌ Unexpected error in _send_sms_placeholder: {e}", exc_info=True)
         return False
-async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_notes: str = None) -> str:
+from typing import Optional
+
+async def _generate_reminder_content(user_id: str, schedule_name: str, schedule_notes: Optional[str] = None) -> str:
     """
     Generate LLM-powered reminder content based on user's configuration.
     Falls back to static content if LLM generation fails.
