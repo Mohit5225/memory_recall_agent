@@ -25,6 +25,8 @@ async def create_new_user(google_sub: str, email: str, name: str) -> Optional[Di
             "display_name": name,   # Display name from Google
             "email": email,
             "roles": ["user"],
+            "whatsapp_number": None,  # No phone by default
+            "whatsapp_verified": False,  # Not verified by default
             "created_at": datetime.now(timezone.utc),
             "last_login": datetime.now(timezone.utc),
             "config": {

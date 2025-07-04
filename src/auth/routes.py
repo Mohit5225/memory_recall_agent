@@ -1,5 +1,12 @@
 import logging
-import secrets
+import secrets , string
+import redis
+
+
+
+import phonenumbers
+from redis.asyncio import Redis
+from src.config.settings import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB_OTP
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, cast
 import secrets
@@ -9,6 +16,9 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from authlib.integrations.starlette_client import OAuthError
 import json
+from src.auth.jwt_utils import get_current_user_from_token
+from src.db.mongo import get_user_collection
+from fastapi import APIRouter, HTTPException, Request, status, Body
 from .oauth import google_oauth
 from .jwt_utils import (
     create_jwt_token, decode_jwt_token, create_mock_jwt_token, 
@@ -24,12 +34,200 @@ from .security_utils import (
     validate_email_security, check_rate_limit, get_client_ip,
     log_security_event, enhance_user_data_security, SecurityValidationError
 )
+from twilio.rest import Client
+from src.config.settings import (
+        REDIS_HOST, REDIS_PORT, REDIS_PASSWORD,
+        TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN , TWILIO_WHATSAPP_NUMBER
+    )
 
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+
+
+ 
+
+@router.post("/phone", status_code=200)
+async def set_whatsapp_number(
+    request: Request,
+    whatsapp_number: str = Body(..., embed=True)
+):
+    """
+    Set or update the WhatsApp number for the authenticated user.
+    Only allows the logged-in user to update their own number.
+    """
+    # 1. Extract user from JWT (cookie)
+    whatsapp_number = whatsapp_number.strip()
+    try:
+        parsed = phonenumbers.parse(whatsapp_number, None)
+        if not phonenumbers.is_valid_number(parsed):
+            raise ValueError("Invalid phone number")
+    except phonenumbers.NumberParseException:
+        raise HTTPException(status_code=400, detail="Invalid WhatsApp number format")
+
+    user = await get_current_user_from_token(request)
+    if not user or not user.get("user_id"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    user_id = user["user_id"]
+
+    # 2. Validate WhatsApp number (basic check: starts with + and digits, min length)
+    if not isinstance(whatsapp_number, str) or not whatsapp_number.startswith("+") or len(whatsapp_number) < 10:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid WhatsApp number format")
+
+    # 3. Update in MongoDB (atomic $set)
+    collection = await get_user_collection()
+    result = await collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"whatsapp_number": whatsapp_number, "whatsapp_verified": False}}
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="User not found or number unchanged")
+    elif result.matched_count == 0:
+        return {"success" : True , "message": "WhatsApp number already set to this value."}
+    # 1. Generate secure 6-digit OTP
+    otp = ''.join(secrets.choice(string.digits) for _ in range(6))
+
+    # 2. Store OTP in Redis with 5 min TTL
+     
+    redis_key = f"otp:{user_id}"
+    await asyncio.to_thread(otp_redis.set, redis_key, otp, ex=300) # 5 min TTL
+
+    # 3. (Optional) Rate limit key for resend (1 per 60s)
+    rate_key = f"otp_rate:{user_id}"
+    if await asyncio.to_thread(otp_redis.exists, rate_key):
+        raise HTTPException(status_code=429, detail="OTP recently sent. Please wait before resending.")
+    await asyncio.to_thread(otp_redis.set, rate_key, 1, ex=60)
+
+    # 4. Send OTP via Twilio WhatsApp
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=f"Your verification code is: {otp}",
+            from_=TWILIO_WHATSAPP_NUMBER,
+            to=f"whatsapp:{whatsapp_number}"
+        )
+        # 5. Log masked send event (never log full OTP)
+        logging.info(f"OTP sent to user_id={user_id}, phone=****{whatsapp_number[-4:]}, msg_sid={message.sid}")
+    except Exception as e:
+        logging.error(f"Failed to send OTP via Twilio: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send OTP. Try again later.")
+
+    return {"success": True, "message": "WhatsApp number updated. OTP sent for verification."}
+
+
+from upstash_redis import Redis as UpstashRedis
+from src.config.settings import OTP_REDIS_URL, OTP_REDIS_TOKEN
+
+if OTP_REDIS_URL is None or OTP_REDIS_TOKEN is None:
+    raise RuntimeError("OTP_REDIS_URL and OTP_REDIS_TOKEN must be set in the environment/config.")
+
+otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)
+import asyncio  # Needed for to_thread wrapping
+@router.post("/verify-phone", status_code=200)
+async def verify_phone(request: Request, otp: str = Body(..., embed=True)):
+    """
+    Verify the OTP sent to the user's WhatsApp number.
+    Adds brute force protection: max 5 attempts in 5 minutes.
+    """
+    # 1. Authenticate user via JWT
+    user = await get_current_user_from_token(request)
+    if not user or not user.get("user_id"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    user_id = user["user_id"]
+
+    redis_key = f"otp:{user_id}"
+    attempt_key = f"otp_attempts:{user_id}"
+
+    # 2. Brute force protection: check and increment attempts
+    attempts = otp_redis.get(attempt_key)
+    attempts = int(attempts) if attempts else 0
+    if attempts >= 5:
+        logger.warning(f"User {user_id} locked out of OTP verification (too many attempts)")
+        raise HTTPException(status_code=429, detail="Too many incorrect OTP attempts. Try again in 5 minutes.")
+
+    # 3. Fetch OTP from Redis
+    stored_otp = await asyncio.to_thread(otp_redis.get, redis_key)
+    if not stored_otp:
+        logger.info(f"OTP expired or not found for user {user_id}")
+        raise HTTPException(status_code=400, detail="OTP expired or not found. Please request a new one.")
+
+    # 4. Compare OTPs
+    if otp != stored_otp:
+        # Increment brute force attempts and set TTL to 5 min
+        await asyncio.to_thread(otp_redis.incr, attempt_key)
+        await asyncio.to_thread(otp_redis.expire, attempt_key, 300)
+        logger.info(f"User {user_id} failed OTP verification attempt {attempts + 1}")
+        raise HTTPException(status_code=400, detail="Invalid OTP. Please try again.")
+
+    # 5. Success: update MongoDB, cleanup Redis
+    collection = await get_user_collection()
+    await collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"whatsapp_verified": True}}
+    )
+    await asyncio.to_thread(otp_redis.delete, redis_key)
+    await asyncio.to_thread(otp_redis.delete, attempt_key)
+    logger.info(f"User {user_id} verified successfully via WhatsApp OTP.")
+
+    return {"success": True, "message": "Phone number verified successfully."}
+
+
+@router.post("/send-otp", status_code=200)
+async def resend_otp(request: Request):
+    """
+    Manually resend OTP to the user's WhatsApp number.
+    Rate-limited to 1 per 60 seconds.
+    """
+    import secrets, string
+    import redis
+
+    # 1. Authenticate user
+    user = await get_current_user_from_token(request)
+    if not user or not user.get("user_id"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    user_id = user["user_id"]
+
+    # 2. Fetch WhatsApp number from DB
+    collection = await get_user_collection()
+    user_doc = await collection.find_one({"user_id": user_id})
+    whatsapp_number = user_doc.get("whatsapp_number") if user_doc else None
+    if not whatsapp_number:
+        raise HTTPException(status_code=400, detail="No WhatsApp number found for user.")
+
+    # 3. Rate limit: block if sent in last 60s
+    rate_key = f"otp_rate:{user_id}"
+    if await asyncio.to_thread(otp_redis.exists, rate_key):
+        raise HTTPException(status_code=429, detail="OTP recently sent. Please wait before resending.")
+    await asyncio.to_thread(otp_redis.set, rate_key, 1, ex=60)
+
+    # 4. Generate secure 6-digit OTP
+    otp = ''.join(secrets.choice(string.digits) for _ in range(6))
+
+    # 5. Store OTP in Redis with 5 min TTL
+    redis_key = f"otp:{user_id}"
+    await asyncio.to_thread(otp_redis.set, redis_key, otp, ex=300)  # 5 min TTL
+
+
+    # 6. Send OTP via Twilio WhatsApp
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        message = client.messages.create(
+            body=f"Your verification code is: {otp}",
+            from_=TWILIO_WHATSAPP_NUMBER,
+            to=f"whatsapp:{whatsapp_number}"
+        )
+        logging.info(f"OTP resent to user_id={user_id}, phone=****{whatsapp_number[-4:]}, msg_sid={message.sid}")
+    except Exception as e:
+        logging.error(f"Failed to resend OTP via Twilio: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resend OTP. Try again later.")
+
+    return {"success": True, "message": "OTP resent to your WhatsApp number."}
+
+
+ 
 @router.get("/google")
 async def google_login(request: Request):
     """Initiate Google OAuth login with enhanced security"""
@@ -76,8 +274,7 @@ async def google_login(request: Request):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, response: Response):
-    """Handle Google OAuth callback with comprehensive security validation"""
-    client_ip = get_client_ip(request)
+     
     
     """Handle Google OAuth callback with comprehensive security validation"""
     client_ip = get_client_ip(request)
@@ -200,8 +397,8 @@ async def google_callback(request: Request, response: Response):
         # Log successful authentication
         
         # Set secure cookie and redirect
-        success_response = Response("✅ Login successful! You can close this window.")
-        success_response.set_cookie(
+        redirect_response = RedirectResponse("http://localhost:5173/dashboard")
+        redirect_response.set_cookie(
             key="access_token",
             value=jwt_token,
             httponly=True,
@@ -210,7 +407,7 @@ async def google_callback(request: Request, response: Response):
             max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60
         )
         
-        return success_response
+        return redirect_response
         
     except OAuthError as e:
         log_security_event(
@@ -368,3 +565,13 @@ async def auth_health_check():
             "fail_secure_mode": token_blacklist.fail_secure,
             "error": str(e)
         }
+    
+from upstash_redis import Redis as UpstashRedis
+from src.config.settings import OTP_REDIS_URL, OTP_REDIS_TOKEN
+
+# Ensure OTP_REDIS_URL and OTP_REDIS_TOKEN are set (not None)
+if OTP_REDIS_URL is None or OTP_REDIS_TOKEN is None:
+    raise RuntimeError("OTP_REDIS_URL and OTP_REDIS_TOKEN must be set in the environment/config.")
+
+# Singleton Upstash client for OTP logic (not per-request)
+otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)

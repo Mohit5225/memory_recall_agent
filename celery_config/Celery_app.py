@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from celery import Celery
 
+
 # Set up project root dynamically
 project_root = str(Path(__file__).resolve().parents[1])  # Adjust path to find the correct project root
 if project_root not in sys.path:
@@ -26,8 +27,7 @@ logging.basicConfig(
 root_logger = logging.getLogger()
 for handler in root_logger.handlers:
     handler.formatter._style._fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    # Increase the maximum message length (None means no limit)
-    handler._ext_record_factory = lambda **kwargs: logging.LogRecord(**{**kwargs, 'msg': str(kwargs.get('msg'))})
+    # No need to set _ext_record_factory; this attribute does not exist and is not required.
 
 logger = logging.getLogger(__name__)
 

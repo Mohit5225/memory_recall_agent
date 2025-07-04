@@ -150,7 +150,7 @@ async def entry_node(state: AgentState) -> AgentState:
     logger.info(f"Entry node initialized with {len(state.get('messages', []))} messages in context window")
     return state
 
-async def call_intent_parser(state: AgentState) -> AgentState:
+async def call_intent_parser( state: AgentState) -> AgentState:
     """Parses intent with message history context."""
     logger.info(f"--- Executing Intent Parsing Node for user: {state['user_id']} ---")
     
@@ -496,7 +496,7 @@ async def handle_other_intent(state: AgentState) -> AgentState:
             "messages": messages + new_messages
         }
 
-async def call_tweak_agent(state: AgentState) -> AgentState:
+async def call_tweak_agent(state: AgentState) -> Dict[str, Any]:
     """
     LangGraph node to call the core process_user_instruction function.
     Handles outcomes and exceptions. Returns routing key for transitions.
@@ -534,7 +534,7 @@ async def call_tweak_agent(state: AgentState) -> AgentState:
         "llm_response": final_outcome
     }
 
-async def call_scheduling_logic(state: AgentState) -> AgentState:
+async def call_scheduling_logic(state: AgentState)-> Dict[str, Any] :
     """
     LangGraph node to call the core scheduling logic function.
     Handles validation, database errors, and routing logic with defensive programming.
@@ -595,7 +595,7 @@ async def call_scheduling_logic(state: AgentState) -> AgentState:
             "llm_response": "An unexpected error occurred while processing your schedule request."
         }
 
-async def report_outcome_node(state: AgentState) -> AgentState:
+async def report_outcome_node(state: AgentState) -> Dict[str, Any]:
     """
     Final node in the graph that ensures the final_outcome is correctly formatted.
     This node acts as a state consolidation point before termination.

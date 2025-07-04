@@ -2,7 +2,7 @@
 import logging
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Any
 from src.config.settings import (
     OAUTH_REQUIRE_EMAIL_VERIFICATION, 
     OAUTH_BLOCK_DISPOSABLE_EMAILS,
@@ -59,7 +59,7 @@ DISPOSABLE_EMAIL_DOMAINS = {
 }
 
 # Rate limiting storage (in production, use Redis)
-login_attempts: Dict[str, Dict[str, any]] = {}
+login_attempts: Dict[str, Dict[str, Any]] = {}
 
 class SecurityValidationError(Exception):
     """Raised when security validation fails"""

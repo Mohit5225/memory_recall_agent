@@ -14,7 +14,7 @@ JWT_SECRET = os.getenv('JWT_SECRET_KEY')
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DAYS = 7
 
-def create_jwt_token(google_sub: str, email: str, user_id: str, roles: list = None) -> str:
+def create_jwt_token(google_sub: str, email: str, user_id: str, roles: Optional[list] = None) -> str:
     """Create JWT token with user data and unique JTI for revocation"""
     if not JWT_SECRET:
         raise ValueError("JWT_SECRET_KEY not configured")
@@ -70,7 +70,7 @@ async def decode_jwt_token(token: str, check_blacklist: bool = True) -> Dict[str
         
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.JWTError:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def get_current_user_from_token(request: Request) -> Optional[Dict[str, Any]]:

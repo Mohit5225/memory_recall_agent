@@ -44,7 +44,10 @@ class User(BaseModel):
     
     # User's email from Google
     email: str = Field(..., description="User's email from Google")
-    
+     # --- New fields for phone verification ---
+    whatsapp_number: Optional[str] = Field(default=None, description="User's WhatsApp number (for verification)")
+    whatsapp_verified: bool = Field(default=False, description="Whether the user's WhatsApp number is verified")
+
     # Auth and profile fields
     roles: List[str] = Field(default_factory=lambda: ["user"])
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

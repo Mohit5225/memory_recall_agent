@@ -28,6 +28,7 @@ REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
 REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
 REDIS_DB: int = int(os.getenv("REDIS_DB", 0))
 
+REDIS_DB_OTP = 1
 
 # Celery Broker and Backend URL (using Redis)
 # Construct URL based on settings
@@ -39,7 +40,7 @@ CELERY_RESULT_BACKEND: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDI
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")  
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")   
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")  
-
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
 
 # --- OAuth Security Settings ---
 OAUTH_REQUIRE_EMAIL_VERIFICATION = os.getenv("OAUTH_REQUIRE_EMAIL_VERIFICATION", "true").lower() == "true"
@@ -47,3 +48,6 @@ OAUTH_BLOCK_DISPOSABLE_EMAILS = os.getenv("OAUTH_BLOCK_DISPOSABLE_EMAILS", "true
 OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv("OAUTH_ALLOWED_DOMAINS", "").split(",") if domain.strip()]
 OAUTH_MAX_LOGIN_ATTEMPTS = int(os.getenv("OAUTH_MAX_LOGIN_ATTEMPTS", "5"))
 OAUTH_RATE_LIMIT_WINDOW = int(os.getenv("OAUTH_RATE_LIMIT_WINDOW", "300"))  # 5 minutes
+
+OTP_REDIS_URL = os.getenv("OTP_REDIS_URL")  # e.g. "https://integral-mantis-55410.upstash.io"
+OTP_REDIS_TOKEN = os.getenv("OTP_REDIS_TOKEN")  # e.g. "AdhyAAIjcDE0ZTk5YjVkMGJjYzE0ZDU2OGJkMTcyMDQyMjY3NWVmM3AxMA"

@@ -7,6 +7,8 @@ interface User {
   display_name: string
   email: string
   roles: string[]
+  whatsapp_number: string | null
+  whatsapp_verified: boolean
   // Add more fields if /auth/me returns them (e.g., last_login)
 }
 
