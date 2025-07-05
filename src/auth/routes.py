@@ -45,7 +45,13 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+from upstash_redis import Redis as UpstashRedis
+from src.config.settings import OTP_REDIS_URL, OTP_REDIS_TOKEN
 
+if OTP_REDIS_URL is None or OTP_REDIS_TOKEN is None:
+    raise RuntimeError("OTP_REDIS_URL and OTP_REDIS_TOKEN must be set in the environment/config.")
+
+otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)
 
  
 
@@ -118,13 +124,7 @@ async def set_whatsapp_number(
     return {"success": True, "message": "WhatsApp number updated. OTP sent for verification."}
 
 
-from upstash_redis import Redis as UpstashRedis
-from src.config.settings import OTP_REDIS_URL, OTP_REDIS_TOKEN
 
-if OTP_REDIS_URL is None or OTP_REDIS_TOKEN is None:
-    raise RuntimeError("OTP_REDIS_URL and OTP_REDIS_TOKEN must be set in the environment/config.")
-
-otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)
 import asyncio  # Needed for to_thread wrapping
 @router.post("/verify-phone", status_code=200)
 async def verify_phone(request: Request, otp: str = Body(..., embed=True)):
@@ -142,7 +142,7 @@ async def verify_phone(request: Request, otp: str = Body(..., embed=True)):
     attempt_key = f"otp_attempts:{user_id}"
 
     # 2. Brute force protection: check and increment attempts
-    attempts = otp_redis.get(attempt_key)
+    attempts = await asyncio.to_thread(otp_redis.get, attempt_key)
     attempts = int(attempts) if attempts else 0
     if attempts >= 5:
         logger.warning(f"User {user_id} locked out of OTP verification (too many attempts)")
@@ -247,8 +247,22 @@ async def google_login(request: Request):
         
         # Generate and store CSRF state token
         state = secrets.token_urlsafe(32)
-          # Enhanced authorization with state parameter
-        redirect_uri = request.url_for('google_callback')
+        request.session['_google_state'] = state
+        logger.debug(f"Generated and saved state to session: {state}")
+        # Add logging after state storage
+        logger.debug(f"Generated OAuth State: {state}")
+        logger.debug(f"Updated Session State: {request.session}")
+        logger.debug(f"Session Keys Present: {request.session.keys()}")
+
+        logger.debug(f"Stored OAuth state in session: {state}")
+         # Verify session was updated
+        logger.debug(f"Generated state: {state}")
+        logger.debug(f"Updated Session: {request.session}")
+        logger.debug(f"Session contains state: {'oauth_state' in request.session}")
+
+
+        # Enhanced authorization with state parameter
+        redirect_uri = str(request.url_for('google_callback'))
         google_client = cast(Any, google_oauth.google)
         authorization_url = await google_client.create_authorization_url(
             redirect_uri,
@@ -263,9 +277,10 @@ async def google_login(request: Request):
             "OAUTH_INITIATION", 
             {"ip": client_ip, "provider": "google"}
         )
-        
-        return RedirectResponse(authorization_url)
-        
+        logger.info(f"authorization_url type: {type(authorization_url)}, value: {authorization_url}")
+        url = authorization_url['url']
+        return RedirectResponse(url)
+
     except HTTPException:
         raise
     except Exception as e:
@@ -274,34 +289,45 @@ async def google_login(request: Request):
 
 @router.get("/google/callback")
 async def google_callback(request: Request, response: Response):
-     
-    
     """Handle Google OAuth callback with comprehensive security validation"""
-    client_ip = get_client_ip(request)
+    logger.debug("\n=== OAuth Callback Debug ===")
+    logger.debug(f"Full Callback URL: {request.url}")
+    logger.debug(f"Callback Headers: {dict(request.headers)}")
+    logger.debug(f"Callback Session State: {request.session}")
+    logger.debug(f"Callback Query Params: {dict(request.query_params)}")
+    logger.debug(f"Callback Cookies: {request.cookies}")
     
+    client_ip = get_client_ip(request)
     try:
-        # Get token from Google with type casting for dynamic attribute
-        google_client = cast(Any, google_oauth.google)
+        # Add logging before token fetch
+        logger.debug("Attempting to get token from Google")
+        google_client = getattr(google_oauth, "google", None)
+        if google_client is None:
+            logger.error("Google OAuth client is not initialized (google_oauth.google is None)")
+            raise HTTPException(status_code=500, detail="Google OAuth client not available")
         token = await google_client.authorize_access_token(request)
-        user_info = await google_client.get('userinfo', token=token)
-        user_data: Dict[str, Any] = user_info.json()  # Explicit type annotation
+        logger.debug("Successfully retrieved token from Google")
+        
+        logger.debug("Attempting to get user info")
+        user_info = await google_client.parse_id_token(request, token)
+        logger.debug(f"User info received: {json.dumps(user_info, default=str)}")
         
         # Extract essential user information
-        google_sub: Optional[str] = user_data.get('sub')
-        email: Optional[str] = user_data.get('email')
-        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        google_sub: Optional[str] = user_info.get('sub')
+        email: Optional[str] = user_info.get('email')
+        name: str = user_info.get('name', email.split('@')[0] if email else 'Unknown')
         
         if not google_sub or not email:
             log_security_event(
                 "OAUTH_INCOMPLETE_DATA",
-                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_data.get(k)]},
+                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_info.get(k)]},
                 "WARNING"
             )
             raise HTTPException(status_code=400, detail="Incomplete user data from OAuth provider")
         
         # Comprehensive security validation
         try:
-            validate_email_security(email, user_data)
+            validate_email_security(email, user_info)
         except SecurityValidationError as e:
             log_security_event(
                 "OAUTH_SECURITY_VIOLATION",
@@ -310,7 +336,7 @@ async def google_callback(request: Request, response: Response):
                     "email": email, 
                     "reason": str(e),
                     "user_data": {
-                        "email_verified": user_data.get('email_verified', False),
+                        "email_verified": user_info.get('email_verified', False),
                         "domain": email.split('@')[-1] if '@' in email else None
                     }
                 },
@@ -319,23 +345,23 @@ async def google_callback(request: Request, response: Response):
             raise HTTPException(status_code=403, detail=str(e))
         
         # Enhance user data with security metadata
-        enhanced_user_data = enhance_user_data_security(user_data)
+        enhanced_user_data = enhance_user_data_security(user_info)
         # Extract essential user information
-        google_sub: Optional[str] = user_data.get('sub')
-        email: Optional[str] = user_data.get('email')
-        name: str = user_data.get('name', email.split('@')[0] if email else 'Unknown')
+        google_sub: Optional[str] = user_info.get('sub')
+        email: Optional[str] = user_info.get('email')
+        name: str = user_info.get('name', email.split('@')[0] if email else 'Unknown')
         
         if not google_sub or not email:
             log_security_event(
                 "OAUTH_INCOMPLETE_DATA",
-                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_data.get(k)]},
+                {"ip": client_ip, "missing_fields": [k for k in ['sub', 'email'] if not user_info.get(k)]},
                 "WARNING"
             )
             raise HTTPException(status_code=400, detail="Incomplete user data from OAuth provider")
         
         # Comprehensive security validation
         try:
-            validate_email_security(email, user_data)
+            validate_email_security(email, user_info)
         except SecurityValidationError as e:
             log_security_event(
                 "OAUTH_SECURITY_VIOLATION",
@@ -344,7 +370,7 @@ async def google_callback(request: Request, response: Response):
                     "email": email, 
                     "reason": str(e),
                     "user_data": {
-                        "email_verified": user_data.get('email_verified', False),
+                        "email_verified": user_info.get('email_verified', False),
                         "domain": email.split('@')[-1] if '@' in email else None
                     }
                 },
@@ -353,7 +379,7 @@ async def google_callback(request: Request, response: Response):
             raise HTTPException(status_code=403, detail=str(e))
         
         # Enhance user data with security metadata
-        enhanced_user_data = enhance_user_data_security(user_data)
+        enhanced_user_data = enhance_user_data_security(user_info)
         
         # Get or create user
         user = await get_or_create_user(google_sub, email, name)
@@ -388,7 +414,7 @@ async def google_callback(request: Request, response: Response):
                 "ip": client_ip,
                 "email": email,
                 "google_sub": google_sub,
-                "email_verified": user_data.get('email_verified', False)
+                "email_verified": user_info.get('email_verified', False)
             }
         )
         
@@ -555,7 +581,8 @@ async def auth_health_check():
             "status": "healthy" if redis_status else "degraded",
             "redis_available": redis_status,
             "fail_secure_mode": token_blacklist.fail_secure,
-            "warning": None if redis_status else "Redis unavailable - authentication will fail in fail-secure mode"
+            "warning": None if redis_status else "Redis unavailable - "
+            "authentication will fail in fail-secure mode"
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")

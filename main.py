@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
             # logger.info("✅ Old messages pruned.") # Corresponding log also removed
         except Exception as e:
             logger.error(f"❌ Cleanup error during shutdown: {e}", exc_info=True)
-
+from starlette.middleware.sessions import SessionMiddleware # 1. Import the middleware
 # --- FastAPI Application Configuration ---
 app = FastAPI(
     title="Memory Recall Agent API",
@@ -104,6 +104,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+import os
+from starlette.middleware.sessions import SessionMiddleware
+import secrets
+# Load secret from .env (already loaded via load_dotenv)
+SESSION_SECRET = os.getenv("secret_key")
+if not SESSION_SECRET or len(SESSION_SECRET) < 32:
+    raise RuntimeError("Session secret is missing or too short! Check your .env.")
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="fastapi_session",
+    max_age=60*60,  # 60 minutes
+    same_site="lax",
+    https_only=False,  # Set True in prod
+    path='/',
+)
+from starlette.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # The origin of your React frontend
+    allow_credentials=True,  # IMPORTANT: This allows cookies to be sent
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 # Create API router with versioning
 api_router = APIRouter()
 
