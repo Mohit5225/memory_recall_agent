@@ -10,7 +10,7 @@ import sys
 import logging
 from datetime import datetime
 import asyncio
-
+import os
 # Import the LangGraph State and Graph builder
 from src.agent.state import AgentState
 from src.agent.graph import build_agent_graph, save_messages_atomically
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
             # logger.info("✅ Old messages pruned.") # Corresponding log also removed
         except Exception as e:
             logger.error(f"❌ Cleanup error during shutdown: {e}", exc_info=True)
-from starlette.middleware.sessions import SessionMiddleware # 1. Import the middleware
+ 
 # --- FastAPI Application Configuration ---
 app = FastAPI(
     title="Memory Recall Agent API",
@@ -104,7 +104,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-import os
+
 from starlette.middleware.sessions import SessionMiddleware
 import secrets
 # Load secret from .env (already loaded via load_dotenv)
