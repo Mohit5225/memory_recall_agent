@@ -23,7 +23,12 @@
     "./src/app/components/*",
     "./-app/src/app/components/*"
   ],
+  "@/app/store": [
+    "./src/app/store",
+    "./-app/src/app/store"
+  ],
   "@/app/store/*": [
+    "./src/app/store/*",
     "./-app/src/app/store/*"
   ]
 }

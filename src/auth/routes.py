@@ -55,7 +55,7 @@ otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)
 
  
 
-@router.post("/phone", status_code=200)
+@router.post("/whatsapp", status_code=200)
 async def set_whatsapp_number(
     request: Request,
     whatsapp_number: str = Body(..., embed=True)
@@ -172,7 +172,7 @@ async def verify_phone(request: Request, otp: str = Body(..., embed=True)):
     await asyncio.to_thread(otp_redis.delete, attempt_key)
     logger.info(f"User {user_id} verified successfully via WhatsApp OTP.")
 
-    return {"success": True, "message": "Phone number verified successfully."}
+    # return {"success": True, "message": "Phone number verified successfully."}
 
 
 @router.post("/send-otp", status_code=200)
@@ -282,7 +282,9 @@ async def google_login(request: Request):
     url = authorization_url_dict['url']
     return RedirectResponse(url)
 
+import os
 
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
 @router.get("/google/callback")
 async def google_callback(request: Request, response: Response):
@@ -360,7 +362,7 @@ async def google_callback(request: Request, response: Response):
             user_id=str(enhanced_user['_id']),
             roles=enhanced_user['roles']
         )
-        response = RedirectResponse(url="/dashboard")
+        response = RedirectResponse(url=f"{FRONTEND_BASE_URL}/whatsapp")
         response.set_cookie(
             key="access_token",
             value=jwt_token,

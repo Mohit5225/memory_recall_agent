@@ -1,7 +1,8 @@
+
 'use client'
-import { Button } from "@/components/ui/button" // Imports the shadcn/ui Button component for consistent UI
+import { Button } from "./ui/button" // Imports the shadcn/ui Button component for consistent UI
 import React from "react"
-import AnimatedSpinner from "@/components/ui/AnimatedSpinner"
+import AnimatedSpinner from "./ui/AnimatedSpinner"
 
 // Auth component: renders a login screen with a "Login with Google" button
 export default function Auth() {

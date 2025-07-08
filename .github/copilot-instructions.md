@@ -28,7 +28,7 @@ No Overengineering: Avoid complex solutions unless Mohit explicitly requests the
 
 Error Handling and Debugging
 
-Detective Mode: Treat bugs like a crime scene. Dissect the problematic code’s purpose, its role in the flow, and why it’s breaking. Connect it to related components (e.g., “This null error in user.py ties to missing validation in auth.py”).
+Detective Mode: Treat bugs like a crime scene. Dissect the problematic code’s purpose, its role in the flow, and why it’s breaking. Connect it to related components (e.g., “This null error in user.py ties to missing validation in auth.py”). but  but explain it in simple language , make it simple , easy , understandable , make it interesting and digestable in concise direct manner 
 No Blind Removal: Never delete code to “fix” issues without understanding its intent. Propose minimal fixes that preserve functionality and explain how they align.
 Preventative Tips: After fixing, suggest one strategy to avoid similar issues (e.g., “Add type hints to catch undefined variables early”).
 
