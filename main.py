@@ -125,7 +125,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # The origin of your React frontend
+    allow_origins=["http://localhost:3000",
+                "http://localhost:5173"   
+                   ],  # The origin of your React frontend
     allow_credentials=True,  # IMPORTANT: This allows cookies to be sent
     allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers

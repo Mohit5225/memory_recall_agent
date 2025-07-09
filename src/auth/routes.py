@@ -54,7 +54,7 @@ if OTP_REDIS_URL is None or OTP_REDIS_TOKEN is None:
 otp_redis = UpstashRedis(url=OTP_REDIS_URL, token=OTP_REDIS_TOKEN)
 
  
-
+# WhatsApp number update endpoint
 @router.post("/whatsapp", status_code=200)
 async def set_whatsapp_number(
     request: Request,
@@ -89,10 +89,13 @@ async def set_whatsapp_number(
         {"user_id": user_id},
         {"$set": {"whatsapp_number": whatsapp_number, "whatsapp_verified": False}}
     )
+    
+    if result.matched_count == 0:
+         logger.error(f"Attempt to set WhatsApp number for non-existent user_id: {user_id}")
+         raise HTTPException(status_code=404, detail="User not found.")
     if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="User not found or number unchanged")
-    elif result.matched_count == 0:
-        return {"success" : True , "message": "WhatsApp number already set to this value."}
+        logger.info(f"User {user_id} tried to set the same WhatsApp number again.")
+        pass
     # 1. Generate secure 6-digit OTP
     otp = ''.join(secrets.choice(string.digits) for _ in range(6))
 
@@ -359,7 +362,7 @@ async def google_callback(request: Request, response: Response):
         jwt_token = create_jwt_token(
             google_sub=enhanced_user['user_id'],
             email=enhanced_user['email'],
-            user_id=str(enhanced_user['_id']),
+            user_id=str(enhanced_user['user_id']),
             roles=enhanced_user['roles']
         )
         response = RedirectResponse(url=f"{FRONTEND_BASE_URL}/whatsapp")
@@ -369,7 +372,8 @@ async def google_callback(request: Request, response: Response):
             httponly=True,
             secure=False, # Set True in production
             samesite="lax",
-            max_age=int(timedelta(days=JWT_EXPIRATION_DAYS).total_seconds())
+            max_age=JWT_EXPIRATION_DAYS * 24 * 60 * 60,
+            path="/"                         # ← make the cookie valid site-wide
         )
         
         log_security_event("OAUTH_SUCCESS", {"ip": client_ip, "user_id": user['user_id']})

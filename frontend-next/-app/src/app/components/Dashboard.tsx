@@ -2,7 +2,8 @@
 import React, { useEffect } from "react"
 import { useSelector, useDispatch } from "react-redux"
 import type { RootState } from "@/app/store"
-import { fetchCurrentUser, logout } from "@/app/store/authSlice"
+// instead of '@/app/store/authSlice'
+import { fetchCurrentUser, logout } from 'src/app/store/authSlice'
 import { Button } from "@/components/ui/button"
 import AnimatedSpinner from "@/components/ui/AnimatedSpinner"
 import { useRouter } from "next/navigation"
@@ -21,7 +22,7 @@ const Dashboard: React.FC = () => {
 
   // If not authenticated, redirect to /auth
   useEffect(() => {
-    if (authStatus === "error" || (!user && authStatus !== "loading")) {
+    if (authStatus === "error") {
       router.push("/auth")
     }
   }, [authStatus, user, router])
