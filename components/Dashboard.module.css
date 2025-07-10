@@ -1,0 +1,143 @@
+/* Sidebar */
+.sidebar {
+  background: linear-gradient(180deg, var(--ds-black), var(--ds-black-light));
+  border-right: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+}
+.sidebarSecondary {
+  color: var(--meteor-gray);
+}
+.sidebarMuted {
+  color: rgba(75, 85, 99, 0.6); /* Meteor Gray at 60% */
+}
+.sidebarButtonNewChat {
+  background: var(--nebula-purple);
+  color: var(--lunar-white);
+}
+.sidebarButtonUpgrade {
+  background: var(--amber);
+  color: var(--lunar-white);
+}
+.memorySlotCard {
+  background: var(--meteor-gray);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+}
+.memorySlotCard:hover {
+  background: rgba(124, 58, 237, 0.1); /* Nebula Purple at 10% */
+}
+.removeButton {
+  background: var(--nebula-purple);
+  color: var(--lunar-white);
+}
+.searchInput {
+  background: var(--ds-black);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+}
+.searchInput::placeholder {
+  color: rgba(241, 245, 249, 0.5); /* Lunar White at 50% */
+}
+.searchInput:focus {
+  outline: 2px solid rgba(124, 58, 237, 0.5); /* Nebula Purple at 50% */
+}
+
+/* Main Chat Area */
+.mainChat {
+  background: var(--ds-black);
+}
+.chatBubbleUser {
+  background: var(--ds-black);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.2);
+}
+.chatBubbleUser:hover {
+  background: rgba(124, 58, 237, 0.1);
+}
+.chatBubbleBot {
+  background: var(--meteor-gray);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.2);
+}
+.chatBubbleBot:hover {
+  background: rgba(124, 58, 237, 0.1);
+}
+.emptyStateText {
+  color: rgba(241, 245, 249, 0.7);
+}
+
+/* Navbar */
+.navbar {
+  background: var(--ds-black);
+  border-bottom: 1px solid var(--meteor-gray);
+  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.1);
+  color: var(--lunar-white);
+}
+.logoTitle {
+  color: var(--lunar-white);
+}
+.settingsButton {
+  color: var(--nebula-purple);
+}
+.settingsButton:hover {
+  background: rgba(124, 58, 237, 0.2);
+}
+
+/* Input Area */
+.inputField {
+  background: var(--ds-black);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+}
+.inputField::placeholder {
+  color: rgba(241, 245, 249, 0.5);
+}
+.inputField:focus {
+  outline: 2px solid rgba(124, 58, 237, 0.5);
+}
+.sendButton {
+  background: linear-gradient(90deg, var(--nebula-purple), var(--nebula-purple-light));
+  color: var(--lunar-white);
+}
+.sendButton:hover {
+  background: rgba(124, 58, 237, 0.8);
+}
+
+/* Right Sidebar (Settings) */
+.rightSidebar {
+  background: linear-gradient(180deg, var(--ds-black), var(--ds-black-light));
+  border-left: 1px solid var(--meteor-gray);
+}
+.sectionHeader {
+  color: var(--lunar-white);
+}
+.textarea, .apiKeyInput {
+  background: var(--ds-black);
+  border: 1px solid var(--meteor-gray);
+  color: var(--lunar-white);
+}
+.textarea::placeholder, .apiKeyInput::placeholder {
+  color: rgba(241, 245, 249, 0.5);
+}
+.textarea:focus, .apiKeyInput:focus {
+  outline: 2px solid rgba(124, 58, 237, 0.5);
+}
+.validateButton {
+  background: linear-gradient(90deg, var(--nebula-purple), var(--nebula-purple-light));
+  color: var(--lunar-white);
+}
+.validateButton:hover {
+  background: rgba(124, 58, 237, 0.8);
+}
+.validationAlertSuccess {
+  background: rgba(46, 125, 50, 0.2);
+  border: 1px solid var(--custom-green);
+  color: var(--lunar-white);
+}
+.validationAlertError {
+  background: rgba(183, 28, 28, 0.2);
+  border: 1px solid var(--custom-red);
+  color: var(--lunar-white);
+}

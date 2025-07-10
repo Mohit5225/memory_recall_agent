@@ -1,88 +1,377 @@
-'use client'
-import React, { useEffect } from "react"
-import { useSelector, useDispatch } from "react-redux"
-import type { RootState } from "@/app/store"
-// instead of '@/app/store/authSlice'
-import { fetchCurrentUser, logout } from 'src/app/store/authSlice'
-import { Button } from "@/components/ui/button"
-import AnimatedSpinner from "@/components/ui/AnimatedSpinner"
-import { useRouter } from "next/navigation"
+import React, { useState, useEffect } from 'react';
+import { cn } from '@/lib/utils';
+import { Menu, X, Settings, PlusCircle, Search, BookOpen, Rocket, Send } from 'lucide-react';
+
+interface ChatMessage {
+  sender: 'user' | 'bot';
+  text: string;
+}
 
 const Dashboard: React.FC = () => {
-  const dispatch = useDispatch()
-  const router = useRouter()
-  const { user, isAuthenticated, authStatus } = useSelector((state: RootState) => state.auth)
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [message, setMessage] = useState('');
+  const [memorySlots, setMemorySlots] = useState<string[]>(['React Router', 'State Management']);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [customInstructions, setCustomInstructions] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [apiValidation, setApiValidation] = useState<'valid' | 'invalid' | null>(null);
+  const [hasMounted, setHasMounted] = useState(false);
 
-  // On mount, fetch user if not loaded
   useEffect(() => {
-    if (!user && authStatus !== "loading") {
-      dispatch(fetchCurrentUser() as any)
-    }
-  }, [user, authStatus, dispatch])
+    setHasMounted(true);
+  }, []);
 
-  // If not authenticated, redirect to /auth
   useEffect(() => {
-    if (authStatus === "error") {
-      router.push("/auth")
-    }
-  }, [authStatus, user, router])
+    if (!hasMounted) return;
+    fetch('/api/chat/history')
+      .then((res) => res.json())
+      .then((data: ChatMessage[]) => setChatHistory(data))
+      .catch(() => setChatHistory([]));
+  }, [hasMounted]);
 
-  if (authStatus === "loading" || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <AnimatedSpinner label="Loading dashboard..." />
-      </div>
-    )
+  const handleSendMessage = () => {
+    if (!message.trim()) return;
+    const newMessage: ChatMessage = { sender: 'user', text: message };
+    setChatHistory([...chatHistory, newMessage]);
+    setMessage('');
+    setTimeout(() => {
+      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'Bot says: Nice one!' }]);
+    }, 500);
+  };
+
+  const handleNewChat = () => {
+    setChatHistory([]);
+    setMessage('');
+  };
+
+  const filteredMemorySlots = memorySlots.filter((slot) =>
+    slot.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const addMemorySlot = (topic: string) => {
+    if (topic.trim() && !memorySlots.includes(topic.trim())) {
+      setMemorySlots([...memorySlots, topic.trim()]);
+    }
+  };
+
+  const removeMemorySlot = (topic: string) => {
+    setMemorySlots(memorySlots.filter((slot) => slot !== topic));
+  };
+
+  const validateApiKey = () => {
+    fetch('/api/validate-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    })
+      .then((res) => (res.ok ? setApiValidation('valid') : setApiValidation('invalid')))
+      .catch(() => setApiValidation('invalid'));
+  };
+
+  // Custom Logo SVG
+  // Deep Space palette: Nebula Purple gradients, Lunar White glow
+  const AppLogo = () => (
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Outer interlocking ring */}
+      <path
+        d="M20 6
+           a14 14 0 1 1 0 28
+           a14 14 0 1 1 0-28"
+        fill="none"
+        stroke="url(#ringGradient)"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        filter="url(#ringGlow)"
+      />
+      {/* Interlocking chat bubble left */}
+      <path
+        d="M13 20
+           a7 7 0 1 1 14 0
+           a7 7 0 1 1 -14 0"
+        fill="none"
+        stroke="url(#bubbleLeft)"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        filter="url(#bubbleGlow)"
+      />
+      {/* Interlocking chat bubble right */}
+      <path
+        d="M27 20
+           a7 7 0 1 0 -14 0
+           a7 7 0 1 0 14 0"
+        fill="none"
+        stroke="url(#bubbleRight)"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        filter="url(#bubbleGlow)"
+      />
+      {/* Message tail */}
+      <path
+        d="M20 27
+           Q22 32 28 32"
+        stroke="url(#tailGradient)"
+        strokeWidth="1.2"
+        fill="none"
+        strokeLinecap="round"
+      />
+      {/* Central glowing dot */}
+      <circle cx="20" cy="20" r="3.5" fill="url(#dotGradient)" />
+      <defs>
+        {/* Outer ring: Nebula Purple to lighter purple */}
+        <linearGradient id="ringGradient" x1="6" y1="6" x2="34" y2="34" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#7C3AED"/>
+          <stop offset="1" stopColor="#9575CD"/>
+        </linearGradient>
+        {/* Left bubble: Nebula Purple to Meteor Gray */}
+        <linearGradient id="bubbleLeft" x1="13" y1="13" x2="27" y2="27" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#7C3AED"/>
+          <stop offset="1" stopColor="#4B5563"/>
+        </linearGradient>
+        {/* Right bubble: lighter purple to Nebula Purple */}
+        <linearGradient id="bubbleRight" x1="27" y1="13" x2="13" y2="27" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#9575CD"/>
+          <stop offset="1" stopColor="#7C3AED"/>
+        </linearGradient>
+        {/* Tail: Nebula Purple to lighter purple */}
+        <linearGradient id="tailGradient" x1="20" y1="27" x2="28" y2="32" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#7C3AED"/>
+          <stop offset="1" stopColor="#9575CD"/>
+        </linearGradient>
+        {/* Dot: Lunar White to Nebula Purple */}
+        <radialGradient id="dotGradient" cx="0.5" cy="0.5" r="0.5" fx="0.6" fy="0.4">
+          <stop offset="0%" stopColor="#F1F5F9"/>
+          <stop offset="100%" stopColor="#7C3AED"/>
+        </radialGradient>
+        <filter id="ringGlow" x="0" y="0" width="40" height="40">
+          <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+        <filter id="bubbleGlow" x="0" y="0" width="40" height="40">
+          <feGaussianBlur stdDeviation="1" result="coloredBlur"/>
+          <feMerge>
+            <feMergeNode in="coloredBlur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+    </svg>
+  );
+
+  // Only render after mount to avoid hydration mismatch
+  if (!hasMounted) {
+    return null;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-100 to-zinc-300 dark:from-zinc-900 dark:to-zinc-800 flex flex-col items-center py-12">
-      <div className="bg-card rounded-xl shadow-xl p-8 w-full max-w-lg flex flex-col items-center">
-        <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
-        <p className="text-muted-foreground mb-6">Welcome, <span className="font-semibold">{user.display_name}</span>!</p>
-        <div className="w-full mb-6">
-          <div className="flex flex-col gap-2">
-            <div>
-              <span className="font-medium">Email:</span> {user.email}
+    <div className="min-h-screen flex bg-[#1A1A1A] text-[#F1F5F9]">
+      {/* Left Sidebar */}
+      <aside
+        className={cn(
+          // Sidebar: Deep Space Black gradient, border Meteor Gray, text Lunar White
+          'fixed top-0 left-0 h-full w-[35vw] bg-gradient-to-b from-[#1A1A1A] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-r border-[#4B5563] shadow-2xl',
+          leftSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center space-x-2">
+            <AppLogo />
+            <span className="text-xl font-bold text-[#F1F5F9]">Memory Recaller</span>
+          </div>
+          <button 
+            onClick={() => setLeftSidebarOpen(false)}
+            className="text-[#4B5563] hover:text-[#7C3AED] transition-colors duration-200"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <button
+          onClick={handleNewChat}
+          // New Chat: Nebula Purple bg, Lunar White text, hover lighter purple
+          className="flex items-center w-full p-3 bg-[#7C3AED] text-[#F1F5F9] rounded-lg hover:bg-[#9575CD] transition-all duration-200 mb-4 shadow-lg"
+        >
+          <PlusCircle size={20} className="mr-2" /> New Chat
+        </button>
+        <div className="relative mb-4">
+          <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#4B5563]" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search memory slots"
+            // Search Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
+            className="w-full pl-10 p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-inner transition-all duration-200"
+          />
+        </div>
+        <h3 className="text-sm font-semibold mb-3 text-[#F1F5F9] uppercase tracking-wide">Library</h3>
+        <div className="space-y-2 mb-4 max-h-[40vh] overflow-y-auto">
+          {filteredMemorySlots.map((slot) => (
+            <div
+              key={slot}
+              // Memory Slot Card: Meteor Gray bg/border, hover Nebula Purple at 10%, Lunar White text, Nebula Purple remove
+              className="flex justify-between items-center p-3 bg-[#4B5563] rounded-lg hover:bg-[#7C3AED]/10 cursor-pointer transition-all duration-200 border border-[#4B5563] shadow-sm"
+            >
+              <span 
+                onClick={() => setMessage(slot)}
+                className="text-[#F1F5F9] hover:text-[#7C3AED] transition-colors duration-200"
+              >
+                {slot}
+              </span>
+              <button 
+                onClick={() => removeMemorySlot(slot)} 
+                className="text-[#7C3AED] hover:text-[#9575CD] transition-colors duration-200"
+              >
+                ✕
+              </button>
             </div>
-            <div>
-              <span className="font-medium">WhatsApp:</span>{" "}
-              {user.whatsapp_number ? (
-                <span>
-                  {user.whatsapp_number}{" "}
-                  {user.whatsapp_verified ? (
-                    <span className="text-green-600 ml-2">✔️ Verified</span>
-                  ) : (
-                    <span className="text-yellow-600 ml-2">⏳ Not Verified</span>
+          ))}
+          <input
+            type="text"
+            placeholder="Add topic"
+            // Add topic input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
+            className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+            onKeyPress={(e) => e.key === 'Enter' && addMemorySlot(e.currentTarget.value)}
+          />
+        </div>
+        <button className="w-full p-3 bg-[#FFC107] text-[#F1F5F9] rounded-lg hover:bg-[#FFB300] flex items-center justify-center transition-all duration-200 shadow-lg">
+          <Rocket size={20} className="mr-2" /> Upgrade Plan
+        </button>
+      </aside>
+
+      {/* Main Chat Area */}
+      <div
+        className={cn(
+          'flex-1 flex flex-col transition-all duration-300',
+          leftSidebarOpen && 'ml-[35vw]'
+        )}
+      >
+        {/* Navbar */}
+        <nav className="sticky top-0 z-20 bg-[#1A1A1A] p-4 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
+          <button
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+            className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
+          >
+            <AppLogo />
+            <span className="text-xl font-bold text-[#F1F5F9]">Memory Recaller</span>
+          </button>
+          <button
+            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+            // Settings: Nebula Purple icon, hover Nebula Purple at 20% bg
+            className="text-[#7C3AED] hover:bg-[#7C3AED]/20 rounded-full p-2 transition-colors duration-200"
+          >
+            <Settings size={24} />
+          </button>
+        </nav>
+
+        {/* Chat Content */}
+        <main className="flex-1 p-6 overflow-y-auto bg-[#1A1A1A]">
+          <div className="w-full space-y-4 max-w-3xl mx-auto">
+            {chatHistory.length === 0 ? (
+              // Empty State: Lunar White at 70% opacity
+              <div className="text-[#F1F5F9]/70 text-lg italic text-center py-8">What's on your mind today?</div>
+            ) : (
+              chatHistory.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    'p-4 rounded-lg break-words max-w-[70%] shadow-lg transition-all duration-200',
+                    msg.sender === 'user' 
+                      // User: Deep Space Black bg, Meteor Gray border, Lunar White text, Deep Space Black shadow, hover Nebula Purple at 10%
+                      ? 'ml-auto bg-[#1A1A1A] border border-[#4B5563] text-[#F1F5F9] shadow-[0_2px_8px_#1A1A1A33] hover:bg-[#7C3AED]/10' 
+                      // Bot: Meteor Gray bg/border, Lunar White text, Deep Space Black shadow, hover Nebula Purple at 10%
+                      : 'mr-auto bg-[#4B5563] border border-[#4B5563] text-[#F1F5F9] shadow-[0_2px_8px_#1A1A1A33] hover:bg-[#7C3AED]/10'
                   )}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">Not set</span>
-              )}
-            </div>
-            <div>
-              <span className="font-medium">Roles:</span> {user.roles.join(", ")}
-            </div>
+                >
+                  {msg.text}
+                </div>
+              ))
+            )}
+          </div>
+        </main>
+
+        {/* Input Area */}
+        <div className="p-4 bg-[#1A1A1A] sticky bottom-0 border-t border-[#4B5563] shadow-lg">
+          <div className="w-full flex items-center max-w-3xl mx-auto">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask anything..."
+              // Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
+              className="flex-1 p-3 bg-[#1A1A1A] rounded-l-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+            />
+            <button
+              onClick={handleSendMessage}
+              // Send Button: Nebula Purple to lighter purple gradient, hover Nebula Purple at 80%, Lunar White icon
+              className="p-3 bg-gradient-to-r from-[#7C3AED] to-[#9575CD] rounded-r-lg hover:bg-[#7C3AED]/80 transition-all duration-200 shadow-lg"
+            >
+              <Send size={20} className="text-[#F1F5F9]" />
+            </button>
           </div>
         </div>
-        <Button
-          variant="destructive"
-          className="w-full"
-          onClick={() => dispatch(logout() as any)}
-        >
-          Logout
-        </Button>
       </div>
-      <div className="mt-10 w-full max-w-lg">
-        <div className="bg-card rounded-lg shadow p-6 flex flex-col items-center">
-          <h2 className="text-xl font-semibold mb-2">🚧 Widgets Coming Soon</h2>
-          <p className="text-muted-foreground text-center">
-            This is your dashboard. Future widgets (reminders, stats, etc.) will appear here.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
 
-export default Dashboard
+      {/* Right Sidebar */}
+      <aside
+        className={cn(
+          // Settings Sidebar: Deep Space Black gradient, border Meteor Gray, text Lunar White
+          'fixed top-0 right-0 h-full w-[35vw] bg-gradient-to-b from-[#1A1A1A] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-l border-[#4B5563] shadow-2xl',
+          rightSidebarOpen ? 'translate-x-0' : 'translate-x-full'
+        )}
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div className="text-xl font-bold text-[#F1F5F9]">Settings</div>
+          <button 
+            onClick={() => setRightSidebarOpen(false)}
+            className="text-[#4B5563] hover:text-[#7C3AED] transition-colors duration-200"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <h2 className="text-lg font-semibold mb-4 text-[#F1F5F9] uppercase tracking-wide">Custom Instructions</h2>
+        <textarea
+          value={customInstructions}
+          onChange={(e) => setCustomInstructions(e.target.value)}
+          placeholder="How should I respond?"
+          // Textarea: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
+          className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 min-h-[150px] resize-y transition-all duration-200"
+        />
+        <h3 className="text-sm font-semibold mt-6 mb-3 text-[#F1F5F9] uppercase tracking-wide">API Settings</h3>
+        <input
+          type="text"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="Enter API key"
+          // API Key Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
+          className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+        />
+        <button
+          onClick={validateApiKey}
+          // Validate Button: Nebula Purple to lighter purple gradient, hover Nebula Purple at 80%
+          className="w-full p-3 mt-3 bg-gradient-to-r from-[#7C3AED] to-[#9575CD] text-[#F1F5F9] rounded-lg hover:bg-[#7C3AED]/80 transition-all duration-200 shadow-lg"
+        >
+          Validate Key
+        </button>
+        {apiValidation === 'valid' && (
+          // Success Alert: bg custom green at 20%, border custom green, Lunar White text
+          <div className="text-[#F1F5F9] mt-3 p-2 bg-[#2E7D32]/20 rounded-lg border border-[#2E7D32]">
+            Key validated!
+          </div>
+        )}
+        {apiValidation === 'invalid' && (
+          // Error Alert: bg custom red at 20%, border custom red, Lunar White text
+          <div className="text-[#F1F5F9] mt-3 p-2 bg-[#B71C1C]/20 rounded-lg border border-[#B71C1C]">
+            Invalid key!
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+};
+
+export default Dashboard;
