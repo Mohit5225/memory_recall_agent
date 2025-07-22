@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Menu, X, Settings, PlusCircle, Search, BookOpen, Rocket, Send } from 'lucide-react';
+import ChatHistory from './ChatHistory';
 
 interface ChatMessage {
   sender: 'user' | 'bot';
@@ -17,28 +18,26 @@ const Dashboard: React.FC = () => {
   const [customInstructions, setCustomInstructions] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiValidation, setApiValidation] = useState<'valid' | 'invalid' | null>(null);
-  const [hasMounted, setHasMounted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    setHasMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hasMounted) return;
     fetch('/api/chat/history')
       .then((res) => res.json())
       .then((data: ChatMessage[]) => setChatHistory(data))
       .catch(() => setChatHistory([]));
-  }, [hasMounted]);
+  }, []);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!message.trim()) return;
-    const newMessage: ChatMessage = { sender: 'user', text: message };
-    setChatHistory([...chatHistory, newMessage]);
+    setIsLoading(true);
+    setChatHistory((prev) => [...prev, { sender: 'user', text: message }]);
     setMessage('');
+
+    // simulate bot response
     setTimeout(() => {
-      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'Bot says: Nice one!' }]);
-    }, 500);
+      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'This is a bot response.' }]);
+      setIsLoading(false);
+    }, 1000);
   };
 
   const handleNewChat = () => {
@@ -162,13 +161,8 @@ const Dashboard: React.FC = () => {
     </svg>
   );
 
-  // Only render after mount to avoid hydration mismatch
-  if (!hasMounted) {
-    return null;
-  }
-
   return (
-    <div className="min-h-screen flex bg-[#1A1A1A] text-[#F1F5F9]">
+    <div className="min-h-screen flex bg-[#1A1A1A] text-[#F1F5F9]/98">
       {/* Left Sidebar */}
       <aside
         className={cn(
@@ -268,47 +262,27 @@ const Dashboard: React.FC = () => {
         </nav>
 
         {/* Chat Content */}
-        <main className="flex-1 p-6 overflow-y-auto bg-[#1A1A1A]">
-          <div className="w-full space-y-4 max-w-3xl mx-auto">
-            {chatHistory.length === 0 ? (
-              // Empty State: Lunar White at 70% opacity
-              <div className="text-[#F1F5F9]/70 text-lg italic text-center py-8">What's on your mind today?</div>
-            ) : (
-              chatHistory.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={cn(
-                    'p-4 rounded-lg break-words max-w-[70%] shadow-lg transition-all duration-200',
-                    msg.sender === 'user' 
-                      // User: Deep Space Black bg, Meteor Gray border, Lunar White text, Deep Space Black shadow, hover Nebula Purple at 10%
-                      ? 'ml-auto bg-[#1A1A1A] border border-[#4B5563] text-[#F1F5F9] shadow-[0_2px_8px_#1A1A1A33] hover:bg-[#7C3AED]/10' 
-                      // Bot: Meteor Gray bg/border, Lunar White text, Deep Space Black shadow, hover Nebula Purple at 10%
-                      : 'mr-auto bg-[#4B5563] border border-[#4B5563] text-[#F1F5F9] shadow-[0_2px_8px_#1A1A1A33] hover:bg-[#7C3AED]/10'
-                  )}
-                >
-                  {msg.text}
-                </div>
-              ))
-            )}
-          </div>
-        </main>
+        <ChatHistory
+          messages={chatHistory}
+          isLoading={isLoading}
+          className="flex-1 bg-[#1A1A1A] rounded-lg overflow-y-auto"
+        />
 
         {/* Input Area */}
-        <div className="p-4 bg-[#1A1A1A] sticky bottom-0 border-t border-[#4B5563] shadow-lg">
+        <div className="p-4 bg-[#1A1A1A] sticky bottom-0 border-t border-[#5F6483] shadow-lg">
           <div className="w-full flex items-center max-w-3xl mx-auto">
             <input
               type="text"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Ask anything..."
-              // Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
-              className="flex-1 p-3 bg-[#1A1A1A] rounded-l-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+              // Input: Deep Space Black bg, Cosmic Gray border, Lunar White placeholder at 50%, Misty Nebula focus
+              className="flex-1 p-3 bg-[#1A1A1A] rounded-l-lg border border-[#5F6483] focus:outline-none focus:ring-2 focus:ring-[#9575CD]/50 focus:border-transparent text-[#F1F5F9]/98 placeholder:text-[#F1F5F9]/50 transition-all duration-200"
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
             />
             <button
               onClick={handleSendMessage}
-              // Send Button: Nebula Purple to lighter purple gradient, hover Nebula Purple at 80%, Lunar White icon
-              className="p-3 bg-gradient-to-r from-[#7C3AED] to-[#9575CD] rounded-r-lg hover:bg-[#7C3AED]/80 transition-all duration-200 shadow-lg"
+              className="p-3 bg-gradient-to-b from-[#7C3AED] to-[#5F6483] rounded-r-lg hover:opacity-90 hover:blur-[0.2px] transition-all duration-200 shadow-lg"
             >
               <Send size={20} className="text-[#F1F5F9]" />
             </button>
