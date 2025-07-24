@@ -222,7 +222,7 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
         final_state = await app.state.agent_graph.ainvoke(initial_state)
         logger.info(f"Agent graph execution completed. Final state: {final_state}")
           # Create assistant message object if we have a response
-        response_content = final_state.get("final_outcome") or final_state.get("llm_response", "")
+        response_content = final_state.get("llm_response") or final_state.get("final_outcome", "")
         if response_content and response_content.strip():
             assistant_message = Message(
                 content=response_content,
@@ -264,7 +264,7 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
                     "intent": "error"
                 }
           # Check if the response indicates an error
-        response_content = final_state.get("final_outcome", "No response generated.")
+        response_content = final_state.get("llm_response", "No response generated.")
         is_error = any(error_phrase in response_content.lower() for error_phrase in [
             "error", "failed", "unexpected error", "internal system error", 
             "database error", "internal database issue"

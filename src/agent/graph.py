@@ -1,5 +1,7 @@
-# src/agent/graph.py
+ # src/agent/graph.py
 from langgraph.graph import StateGraph, END
+
+from src import config
 from .state import AgentState
 from src.core.tweak_agent import process_user_instruction
 from src.core.intent_parser import parse_user_intent
@@ -11,10 +13,12 @@ from motor.motor_asyncio import AsyncIOMotorClient # Import AsyncIOMotorClient
 from src.db.mongo import get_mongo_client, DatabaseError 
 from src.config.constants import DEFAULT_CONTEXT_WINDOW, GENERAL_QUERY_CONTEXT, ACKNOWLEDGE_CONTEXT
 from src.config.settings import DB_NAME # Import DB_NAME
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 import logging
 from datetime import datetime # Ensure datetime is imported
 import asyncio
+
+from src.agent import state
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +73,7 @@ async def save_messages_atomically(user_id: str, messages: List[Message]) -> boo
         logger.error(f"SAVE_MESSAGES_ATOMICALLY (Exception): local_mongo_client was {repr(local_mongo_client)} at the time of exception.")
         return False
 
-def format_message_history(messages: List[Message], limit: int = None) -> str:
+def format_message_history(messages: List[Message], limit: Optional[int] = None) -> str:
     """Format message history for LLM context with proper windowing."""
     if not messages:
         return "No previous messages"
@@ -77,9 +81,10 @@ def format_message_history(messages: List[Message], limit: int = None) -> str:
     history = messages[-limit:] if limit else messages
     return "\n".join(msg.to_text() for msg in history)
 
-def create_message(content: str, role: str, context: dict = None, processing_status: ProcessingStatus = ProcessingStatus.PENDING) -> Message:
+def create_message(user_id: str, content: str, role: Literal["user", "assistant"], context: Optional[dict] = None, processing_status: ProcessingStatus = ProcessingStatus.PENDING) -> Message:
     """Create a new Message object with standardized format and metadata."""
     return Message(
+        user_id=user_id,
         content=content,
         role=role,
         timestamp=datetime.utcnow(),  # Ensure proper ordering
@@ -95,8 +100,8 @@ Current configuration: {config}
 Previous messages: {message_history}
 Current query: {query}
 
-Generate a helpful, contextual response addressing their query.
-Keep the response focused, natural, and relevant to their question.
+Generate a helpful, contextual response addressing their query do not ask for timezone and country ever
+Keep the response focused, and tone as requested , and relevant to their question.
 If you need more information, ask a specific follow-up question."""
 
 ACKNOWLEDGE_PROMPT = """Generate an acknowledgment response.
@@ -104,26 +109,34 @@ Context:
 User ID: {user_id}
 Their message: {query}
 Previous messages: {message_history}
+Current configuration: {config}
 
 Generate a natural, contextual acknowledgment that:
 1. Shows you understood their message
 2. References relevant context from the conversation
-3. Keeps the tone professional but friendly
-4. Is concise (1-2 sentences)"""
+3. strictly follow tone and speaking manner user have described in earlier or current request
+4. Is concise (1-2 sentences)
+5.do not ask for timezone and country ever
+"""
 
 CLARIFICATION_PROMPT = """The user's intent is unclear and needs clarification.
 Context:
 User ID: {user_id}
 Their message: {query}
 Previous messages: {message_history}
+Current configuration: {config}
+
 Available intents: config_update, schedule_request, general_query
 
 Generate a clarifying question that:
 1. Acknowledges what you understood from their message
 2. Asks specifically about what's unclear
 3. If relevant, references their previous interactions
-4. Gives examples of what you're looking for"""
+4. Gives examples of what you're looking for
+5. do not ask for timezone and location ever !
+6. strictly follow tone and speaking manner user have described in earlier or current request
 
+"""
 # --- Node Definitions ---
 
 async def entry_node(state: AgentState) -> AgentState:
@@ -158,7 +171,7 @@ async def call_intent_parser( state: AgentState) -> AgentState:
     context_window = state.get('context_window', CLARIFICATION_CONTEXT)
     message_history = format_message_history(messages, context_window)
     
-    parsed_intent = await parse_user_intent(state['user_input'], state, message_history)
+    parsed_intent = await parse_user_intent(state['user_input'], dict(state), message_history)
     logger.info(f"Intent Parsing Node identified intent: '{parsed_intent}'")
     
     state['parsed_intent'] = parsed_intent or "other"
@@ -172,13 +185,15 @@ async def handle_general_query(state: AgentState) -> AgentState:
     context_window = state.get('context_window', GENERAL_QUERY_CONTEXT)
     message_history = format_message_history(messages, context_window)
     user_id = state['user_id']
+    user_query = state['user_input']
+    config = state.get('current_config_prompt', '')
     
     try:
         prompt = GENERAL_QUERY_PROMPT.format(
             user_id=user_id,
-            config=state.get('current_config_prompt', 'No configuration set'),
+            config=config,
             message_history=message_history,
-            query=state['user_input']
+            query=user_query
         )
         
         llm_response, context = await get_gemini_response_async(prompt)
@@ -189,12 +204,14 @@ async def handle_general_query(state: AgentState) -> AgentState:
             fallback_response = "I'm sorry, I couldn't process your request. Please try again later."
             new_messages = [
                 create_message(
+                    user_id=user_id,
                     content=state['user_input'],
                     role="user",
                     context={"handler": "general_query", "sequence": len(messages)},
                     processing_status=ProcessingStatus.COMPLETED  # User input completed
                 ),
                 create_message(
+                    user_id=user_id,
                     content=fallback_response,
                     role="assistant",
                     context={"error": "llm_failure", "handler": "general_query"},
@@ -218,12 +235,14 @@ async def handle_general_query(state: AgentState) -> AgentState:
         # Create message objects for successful transaction
         new_messages = [
             create_message(
+                user_id=user_id,
                 content=state['user_input'],
                 role="user",
                 context={"handler": "general_query", "sequence": len(messages)},
                 processing_status=ProcessingStatus.COMPLETED  # User input completed
             ),
             create_message(
+                user_id=user_id,
                 content=llm_response,
                 role="assistant",
                 context={"handler": "general_query", "sequence": len(messages) + 1},
@@ -245,7 +264,6 @@ async def handle_general_query(state: AgentState) -> AgentState:
         return {
             **state,
             "llm_response": llm_response,
-            "final_outcome": "General query processed successfully",
             "messages": updated_messages
         }
         
@@ -254,14 +272,16 @@ async def handle_general_query(state: AgentState) -> AgentState:
         fallback_response = "I encountered an error processing your request. Please try again."
         new_messages = [
             create_message(
-                state['user_input'], 
-                "user",
+                user_id=user_id,
+                content=state['user_input'], 
+                role="user",
                 processing_status=ProcessingStatus.COMPLETED  # User input completed
             ),
             create_message(
-                fallback_response, 
-                "assistant", 
-                {"error": str(e), "handler": "general_query"},
+                user_id=user_id,
+                content=fallback_response, 
+                role="assistant", 
+                context={"error": str(e), "handler": "general_query"},
                 processing_status=ProcessingStatus.FAILED
             )
         ]
@@ -288,12 +308,14 @@ async def handle_acknowledge(state: AgentState) -> AgentState:
     context_window = state.get('context_window', ACKNOWLEDGE_CONTEXT)
     message_history = format_message_history(messages, context_window)
     user_id = state['user_id']
-    
+    user_query = state['user_input']
+    config = state.get('current_config_prompt', '')
     try:
         prompt = ACKNOWLEDGE_PROMPT.format(
             user_id=user_id,
             query=state['user_input'],
-            message_history=message_history
+            message_history=message_history,
+            config=config
         )
         
         llm_response, context = await get_gemini_response_async(prompt)
@@ -304,41 +326,50 @@ async def handle_acknowledge(state: AgentState) -> AgentState:
             fallback_response = "Thank you for your message. Is there anything else I can help with?"
             new_messages = [
                 create_message(
-                    state['user_input'], 
-                    "user",
+                    user_id=user_id,
+                    content=state['user_input'], 
+                    role="user",
+                    context={"handler": "general_query", "sequence": len(messages)},
                     processing_status=ProcessingStatus.COMPLETED
                 ),
                 create_message(
+                    user_id=user_id,
                     content=fallback_response,
                     role="assistant",
-                    context={"error": "llm_failure"},
+                    context={"handler": "general_query", "fallback": True},
                     processing_status=ProcessingStatus.FAILED
                 )
             ]
-            await save_messages_atomically(user_id, new_messages)
+            if not await save_messages_atomically(user_id, new_messages):
+                raise Exception("Failed to save messages atomically")
             
             # Update state status tracking
             state['processing_status'] = ProcessingStatus.FAILED
             state['error_details'] = "LLM response generation failed"
             state['completed_at'] = datetime.utcnow()
+            updated_messages = (messages + new_messages)[-context_window:]
             
             return {
                 **state,
-                "llm_response": fallback_response,
-                "final_outcome": "Used fallback acknowledgment",
-                "messages": messages + new_messages
+                "llm_response": llm_response or "",
+                "final_outcome": llm_response or "",
+                "messages": updated_messages
             }
         
         # Create and save messages atomically with proper status
         new_messages = [
             create_message(
-                state['user_input'], 
-                "user",
+                user_id=user_id,
+                content=state['user_input'], 
+                role="user",
+                 context={"handler": "general_query", "sequence": len(messages)},
                 processing_status=ProcessingStatus.COMPLETED
             ),
             create_message(
-                llm_response, 
-                "assistant",
+                user_id=user_id,
+                content=llm_response, 
+                role="assistant",
+                context={"handler": "general_query", "sequence": len(messages) + 1},
                 processing_status=ProcessingStatus.COMPLETED
             )
         ]
@@ -362,11 +393,13 @@ async def handle_acknowledge(state: AgentState) -> AgentState:
         fallback_response = "Thank you. Let me know if you need anything else."
         new_messages = [
             create_message(
-                state['user_input'], 
-                "user",
+                user_id=user_id,
+                content=state['user_input'], 
+                role="user",
                 processing_status=ProcessingStatus.COMPLETED
             ),
             create_message(
+                user_id=user_id,
                 content=fallback_response,
                 role="assistant",
                 context={"error": str(e)},
@@ -412,11 +445,13 @@ async def handle_other_intent(state: AgentState) -> AgentState:
             fallback_response = "I'm not sure I understand. Could you please rephrase your request, specifying if you want to schedule something, update settings, or ask a question?"
             new_messages = [
                 create_message(
-                    state['user_input'], 
-                    "user",
+                    user_id=user_id,
+                    content=state['user_input'], 
+                    role="user",
                     processing_status=ProcessingStatus.COMPLETED
                 ),
                 create_message(
+                    user_id=user_id,
                     content=fallback_response,
                     role="assistant",
                     context={"error": "llm_failure"},
@@ -440,13 +475,15 @@ async def handle_other_intent(state: AgentState) -> AgentState:
         # Create and save messages atomically with proper status
         new_messages = [
             create_message(
-                state['user_input'], 
-                "user",
+                user_id=user_id,
+                content=state['user_input'], 
+                role="user",
                 processing_status=ProcessingStatus.COMPLETED
             ),
             create_message(
-                llm_response, 
-                "assistant",
+                user_id=user_id,
+                content=llm_response, 
+                role="assistant",
                 processing_status=ProcessingStatus.COMPLETED
             )
         ]
@@ -470,11 +507,13 @@ async def handle_other_intent(state: AgentState) -> AgentState:
         fallback_response = "I'm having trouble understanding. Could you please rephrase your request?"
         new_messages = [
             create_message(
-                state['user_input'], 
-                "user",
+                user_id=user_id,
+                content=state['user_input'], 
+                role="user",
                 processing_status=ProcessingStatus.COMPLETED
             ),
             create_message(
+                user_id=user_id,
                 content=fallback_response,
                 role="assistant",
                 context={"error": str(e)},
@@ -530,8 +569,9 @@ async def call_tweak_agent(state: AgentState) -> Dict[str, Any]:
     logger.info(f"Tweak Config Node returning outcome: '{outcome_key}' and final outcome: '{final_outcome}'")
     return {
         "next": outcome_key,
-        "final_outcome": final_outcome,
-        "llm_response": final_outcome
+        "llm_response": final_outcome,
+        "final_outcome": outcome_key
+         
     }
 
 async def call_scheduling_logic(state: AgentState)-> Dict[str, Any] :
@@ -540,6 +580,9 @@ async def call_scheduling_logic(state: AgentState)-> Dict[str, Any] :
     Handles validation, database errors, and routing logic with defensive programming.
     """
     logger.info(f"--- Executing Scheduling Logic Node for user: {state['user_id']} ---")
+    messages = state.get('messages', [])
+    context_window = state.get('context_window', GENERAL_QUERY_CONTEXT)
+    message_history = format_message_history(messages, context_window)
     user_id = state['user_id']
     user_input = state['user_input']
 
@@ -578,8 +621,20 @@ async def call_scheduling_logic(state: AgentState)-> Dict[str, Any] :
             }
         
         logger.info(f"Scheduling logic returned valid outcome: {next_action}")
-        return outcome_dict
-        
+        # ─── INLINE LLM REWRITE ──────────────────────────────────────────────────────
+        static_reply = outcome_dict.get("final_logic", "")
+        prompt = GENERAL_QUERY_PROMPT.format(
+            user_id=user_id,
+            config=state.get("current_config_prompt", ""),
+            message_history=message_history,
+            query=static_reply
+        )
+        llm_text, _ = await get_gemini_response_async(prompt)
+        return {
+            "next": next_action,
+             "llm_response": llm_text or static_reply,
+             "final_outcome": next_action
+   }
     except DatabaseError as e:
         logger.error(f"Database error caught in scheduling node for user {user_id}: {e}")
         return {
