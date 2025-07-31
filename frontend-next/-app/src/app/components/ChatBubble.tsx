@@ -1,15 +1,17 @@
 import { User, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import ReactMarkdown from 'react-markdown'
 
 export interface ChatBubbleProps {
-  role: 'user' | 'bot'
+  role: 'user' | 'assistant'
   content: string
 }
 
 export default function ChatBubble({ role, content }: ChatBubbleProps) {
   const isUser = role === 'user'
   const Icon = isUser ? User : Bot
+
+  // Debug logging
+  console.log("ChatBubble render - role:", role, "content:", content);
 
   return (
     <div

@@ -4,13 +4,18 @@ import LoadingBubble from './ui/loading_bubble'
 import { cn } from '@/lib/utils'
 
 export interface ChatHistoryProps {
-  messages: { sender: 'user' | 'bot'; text: string }[]
+  messages: { role: 'user' | 'assistant'; content: string }[]
   isLoading: boolean
   className?: string
 }
 
 export default function ChatHistory({ messages, isLoading, className }: ChatHistoryProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+
+  // Debug logging
+  console.log("ChatHistory render - messages:", messages);
+  console.log("ChatHistory render - messages length:", messages.length);
+  console.log("ChatHistory render - isLoading:", isLoading);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -26,13 +31,21 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
         className
       )}
     >
-      {messages.map((message, index) => (
-        <ChatBubble
-          key={index}
-          role={message.sender}
-          content={message.text}
-        />
-      ))}
+      {messages.length === 0 && !isLoading && (
+        <div className="text-center text-gray-500 py-8">
+          No messages yet. Start a conversation!
+        </div>
+      )}
+      {messages.map((message, index) => {
+        console.log(`Rendering message ${index}:`, message);
+        return (
+          <ChatBubble
+            key={index}
+            role={message.role}
+            content={message.content}
+          />
+        );
+      })}
       {isLoading && <LoadingBubble />}
     </div>
   )

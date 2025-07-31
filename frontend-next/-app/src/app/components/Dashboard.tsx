@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Menu, X, Settings, PlusCircle, Search, BookOpen, Rocket, Send } from 'lucide-react';
 import ChatHistory from './ChatHistory';
+import { RootState } from '../store';
+import { useSelector } from 'react-redux';
 
 interface ChatMessage {
-  sender: 'user' | 'bot';
-  text: string;
+  role: 'user' | 'assistant';
+  content: string;
 }
+
 
 const Dashboard: React.FC = () => {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
@@ -19,28 +22,91 @@ const Dashboard: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [apiValidation, setApiValidation] = useState<'valid' | 'invalid' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const userId = useSelector((state: RootState) => state.auth.user?.user_id);
+  
+ 
 
-  useEffect(() => {
-    fetch('/api/chat/history')
-      .then((res) => res.json())
-      .then((data: ChatMessage[]) => setChatHistory(data))
-      .catch(() => setChatHistory([]));
-  }, []);
+useEffect(() => {
+  console.log("Dashboard useEffect triggered - userId:", userId);
+  
+  const fetchChatHistory = async () => {
+    console.log("fetchChatHistory called, userId:", userId);
 
-  const handleSendMessage = async () => {
-    if (!message.trim()) return;
-    setIsLoading(true);
-    setChatHistory((prev) => [...prev, { sender: 'user', text: message }]);
-    setMessage('');
+    if (!userId) {
+      console.log("No userId found, skipping fetch");
+      return;
+    }
+    try {
+      setIsLoading(true);
+      console.log("Making fetch request to chat history API");
+      const response = await fetch('http://localhost:8000/api/v1/chat/history', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      console.log("Response status:", response.status);
 
-    // simulate bot response
-    setTimeout(() => {
-      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'This is a bot response.' }]);
+      if (!response.ok) {
+        throw new Error('Failed to fetch chat history');
+      }
+
+      const data = await response.json();
+      console.log("Fetched messages:", data);
+      console.log("Data length:", data.length);
+      console.log("First message:", data[0]);
+      // Use backend data directly since it now has correct role/content format
+      setChatHistory(data);
+      console.log("Chat history state updated");
+    } catch (error) {
+      console.error('Failed to fetch chat history:', error);
+      setChatHistory([]);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
+  fetchChatHistory();
+}, [userId]);
+
+const handleSendMessage = async () => {
+  if (!message.trim()) return;
+  setIsLoading(true);
+  
+  const newMessage = { role: 'user' as const, content: message };
+  setChatHistory(prev => [...prev, newMessage]);
+  setMessage('');
+
+  try {
+    const response = await fetch('http://localhost:8000/api/v1/chat', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: message,
+        user_id: userId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to send message');
+    }
+
+    const data = await response.json();
+    setChatHistory(prev => [...prev, {
+      role: 'assistant',
+      content: data.response
+    }]);
+  } catch (error) {
+    console.error('Failed to send message:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
   const handleNewChat = () => {
+    console.log("New chat triggered - clearing chat history");
     setChatHistory([]);
     setMessage('');
   };

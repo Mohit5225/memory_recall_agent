@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 interface ChatMessage {
-  sender: 'user' | 'bot';
-  text: string;
+  role: 'user' | 'assistant';
+  content: string;
 }
 
 const AgentPage: React.FC = () => {
@@ -23,13 +23,13 @@ const AgentPage: React.FC = () => {
 
   const handleSendMessage = () => {
     if (!message.trim()) return;
-    const newMessage: ChatMessage = { sender: 'user', text: message };
+    const newMessage: ChatMessage = { role: 'user', content: message };
     setChatHistory([...chatHistory, newMessage]);
     setMessage('');
 
-    // Simulate bot response
+    // Simulate assistant response
     setTimeout(() => {
-      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'This is a bot response.' }]);
+      setChatHistory((prev) => [...prev, { role: 'assistant', content: 'This is a bot response.' }]);
     }, 1000);
   };
 
@@ -68,10 +68,10 @@ const AgentPage: React.FC = () => {
                 key={idx}
                 className={cn(
                   'p-2 rounded-lg mb-2',
-                  msg.sender === 'user' ? 'bg-blue-500 text-white self-end' : 'bg-gray-300 dark:bg-gray-700 text-black'
+                  msg.role === 'user' ? 'bg-blue-500 text-white self-end' : 'bg-gray-300 dark:bg-gray-700 text-black'
                 )}
               >
-                {msg.text}
+                {msg.content}
               </div>
             ))}
           </div>
