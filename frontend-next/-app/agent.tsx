@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect ,useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 interface ChatMessage {
-  sender: 'user' | 'bot';
+  sender: 'user' | 'assistant';
   text: string;
 }
 
@@ -12,7 +12,28 @@ const AgentPage: React.FC = () => {
   const [message, setMessage] = useState('');
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); // <-- this scrolls to bottom
+    }
+  }, [chatHistory]); // <-- runs every time chatHistory changes
 
+  // ...existing code...
+  <div className="flex-1 w-full max-w-3xl overflow-y-auto bg-white dark:bg-gray-900 shadow-md rounded-lg p-4">
+    {chatHistory.map((msg, idx) => (
+      <div
+        key={idx}
+        className={cn(
+          'p-2 rounded-lg mb-2',
+          msg.sender === 'user' ? 'bg-blue-500 text-white self-end' : 'bg-gray-300 dark:bg-gray-700 text-black'
+        )}
+      >
+        {msg.text}
+      </div>
+    ))}
+    <div ref={chatEndRef} /> {/* <-- add this right after the map */}
+  </div>
   useEffect(() => {
     // Fetch chat history from backend
     fetch('/api/chat/history')
@@ -24,13 +45,8 @@ const AgentPage: React.FC = () => {
   const handleSendMessage = () => {
     if (!message.trim()) return;
     const newMessage: ChatMessage = { sender: 'user', text: message };
-    setChatHistory([...chatHistory, newMessage]);
+    setChatHistory((prev) => [...prev, newMessage]);
     setMessage('');
-
-    // Simulate bot response
-    setTimeout(() => {
-      setChatHistory((prev) => [...prev, { sender: 'bot', text: 'This is a bot response.' }]);
-    }, 1000);
   };
 
   return (
@@ -110,4 +126,4 @@ const AgentPage: React.FC = () => {
   );
 };
 
-export default AgentPage;
+export default AgentPage 

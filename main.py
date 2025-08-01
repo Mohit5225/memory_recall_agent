@@ -1,6 +1,6 @@
 # main.py
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -15,6 +15,8 @@ import os
 from src.agent.state import AgentState
 from src.agent.graph import build_agent_graph, save_messages_atomically
 from src.config.constants import DEFAULT_CONTEXT_WINDOW  # Import for consistent context windowing
+from src.auth.jwt_utils import get_current_user_from_token
+from src.db.mongo import DB_NAME
 
 # Import auth router
 from src.auth.routes import router as auth_router
@@ -285,7 +287,98 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
             "response": "Internal server error",
             "intent": "error"
         }
+class MessageResponse(BaseModel):
+    sender: str
+    text: str
 
+
+
+@api_router.get(
+    "/chat/history",
+    response_model=List[MessageResponse],
+    summary="Get recent chat history for the logged-in user"
+)
+async def chat_history(request: Request) -> List[Dict[str, str]]:
+    logger.info("🔍 Chat history endpoint called - starting authentication check")
+    
+    try:
+        # Step 1: JWT Authentication with detailed logging
+        logger.info("📋 Step 1: Attempting to extract user from JWT token...")
+        user = await get_current_user_from_token(request)
+        
+        if not user:
+            logger.error("❌ JWT token validation failed - no user returned")
+            raise HTTPException(status_code=401, detail="Not authenticated")
+            
+        if not user.get("user_id"):
+            logger.error(f"❌ JWT valid but missing user_id. User object: {user}")
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        
+        user_id = user["user_id"]
+        logger.info(f"✅ Step 1 SUCCESS: Authenticated user_id='{user_id}'")
+        
+        # Step 2: Database Connection with detailed logging
+        logger.info("📋 Step 2: Attempting to get MongoDB client...")
+        client = await get_mongo_client()
+        
+        if client is None:
+            logger.error("❌ Step 2 FAILED: MongoDB client returned None")
+            raise HTTPException(status_code=503, detail="Database connection unavailable")
+        
+        logger.info("✅ Step 2 SUCCESS: MongoDB client obtained")
+        
+        # Step 3: Database Access with detailed logging
+        logger.info(f"📋 Step 3: Accessing database '{DB_NAME}' and collection 'messages'...")
+        db = client[DB_NAME]
+        collection = db["messages"]
+        logger.info("✅ Step 3 SUCCESS: Database and collection references created")
+        
+        # Step 4: Query Execution with detailed logging
+        logger.info(f"📋 Step 4: Executing query for user_id='{user_id}'...")
+        logger.info(f"Query filter: {{'user_id': '{user_id}'}}")
+        logger.info("Query projection: {'content': 1, 'role': 1, '_id': 0}")
+        logger.info("Query sort: timestamp descending, limit: 50")
+        
+        cursor = collection.find(
+            {"user_id": user_id},  # Use extracted user_id variable
+            {"content": 1, "role": 1, "_id": 0}
+        ).sort("timestamp", -1).limit(50)
+        
+        logger.info("✅ Step 4 SUCCESS: Query cursor created")
+        
+        # Step 5: Fetch Results with detailed logging
+        logger.info("📋 Step 5: Converting cursor to list...")
+        messages = await cursor.to_list(length=None)
+        
+        message_count = len(messages)
+        logger.info(f"✅ Step 5 SUCCESS: Retrieved {message_count} messages from database")
+        
+        # Step 6: Data Transformation with detailed logging
+        logger.info("📋 Step 6: Transforming messages to response format...")
+        
+        if message_count > 0:
+            logger.info(f"Sample message structure: {messages[0]}")
+        
+        transformed_messages = [
+            {"sender": msg["role"], "text": msg["content"]} 
+            for msg in messages
+        ]
+        
+        logger.info(f"✅ Step 6 SUCCESS: Transformed {len(transformed_messages)} messages")
+        logger.info(f"🎉 Chat history endpoint completed successfully for user '{user_id}'")
+        
+        return transformed_messages
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions without logging (already logged above)
+        raise
+    except Exception as e:
+        logger.error(f"💥 UNEXPECTED ERROR in chat_history endpoint: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error args: {e.args}")
+        raise HTTPException(status_code=500, detail="Failed to fetch chat history")
+
+ 
 # Include router
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(auth_router)  # Auth routes don't need prefix (e.g., /auth/google)

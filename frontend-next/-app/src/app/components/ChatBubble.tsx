@@ -1,14 +1,15 @@
 import { User, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import ReactMarkdown from 'react-markdown'
+import { Assistant } from 'next/font/google'
 
 export interface ChatBubbleProps {
-  role: 'user' | 'bot'
-  content: string
+  sender: 'user' | 'assistant'
+  text : string
 }
 
-export default function ChatBubble({ role, content }: ChatBubbleProps) {
-  const isUser = role === 'user'
+export default function ChatBubble({ sender , text }: ChatBubbleProps) {
+  const isUser = sender === 'user'
   const Icon = isUser ? User : Bot
 
   return (
@@ -35,7 +36,7 @@ export default function ChatBubble({ role, content }: ChatBubbleProps) {
         )}
       >
         {/* Use simple <p> instead of ReactMarkdown if you don't have the dependency */}
-        <p>{content}</p>
+        <p>{text}</p>
       </div>
     </div>
   )

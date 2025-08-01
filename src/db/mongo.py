@@ -320,31 +320,31 @@ async def get_recent_messages(user_id: str, limit: int = DEFAULT_CONTEXT_WINDOW)
     Uses index on timestamp for efficient retrieval.
     """
     try:
-        collection = await get_messages_collection()
-        
-        cursor = collection.find(
-            {"user_id": user_id},
-            projection={"_id": 0}  # MODIFIED: Removed "user_id": 0 to ensure it's included
-        ).sort("timestamp", -1).limit(limit)
-        
-        # messages = [Message.from_dict(doc) async for doc in cursor] # Old line for context
-        # Corrected line to ensure user_id is passed if it was missing due to projection
-        messages_data = await cursor.to_list(length=limit)
-        messages = []
-        for doc in messages_data:
-            # Ensure user_id from the query filter is used if somehow still missing in doc,
-            # though the projection change should be the primary fix.
-            # This is more of a safeguard or for contexts where doc might not have it.
-            # However, for this specific error, the projection was the culprit.
-            # The Message.from_dict will now receive user_id from the doc.
-            if 'user_id' not in doc and user_id: # This check is now less critical with projection fix
-                 doc['user_id'] = user_id # Should not be needed if projection is correct
-            messages.append(Message.from_dict(doc))
+        coll = await get_messages_collection()
 
-        return list(reversed(messages))  # Return in chronological order
+        # 1) Match only this user
+        # 2) Sort descending, limit to N
+        # 3) Sort that subset ascending
+        # 4) Strip out _id
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$sort": {"timestamp": -1}},
+            {"$limit": limit},
+            {"$sort": {"timestamp": 1}},
+            {"$project": {"_id": 0}}
+        ]
+        cursor = coll.aggregate(pipeline)
+        docs = await cursor.to_list(length=limit)
+
+        # Hydrate Pydantic models, ensure user_id present
+        return [
+            Message.from_dict({**doc, "user_id": user_id})
+            for doc in docs
+        ]
+
     except PyMongoError as e:
-        logger.error(f"Error retrieving messages: {e}")
-        raise DatabaseError(f"Failed to retrieve messages: {e}")
+        logger.error(f"Error retrieving messages: {e}", exc_info=True)
+        raise DatabaseError(f"Failed to retrieve messages: {e}") from e
 
 @with_retry()
 async def prune_old_messages(user_id: str, keep_count: int = 100) -> bool:
