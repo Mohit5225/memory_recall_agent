@@ -349,6 +349,7 @@ async def chat_history(request: Request) -> List[Dict[str, str]]:
         # Step 5: Fetch Results with detailed logging
         logger.info("📋 Step 5: Converting cursor to list...")
         messages = await cursor.to_list(length=None)
+        messages.reverse()  
         
         message_count = len(messages)
         logger.info(f"✅ Step 5 SUCCESS: Retrieved {message_count} messages from database")
@@ -377,6 +378,7 @@ async def chat_history(request: Request) -> List[Dict[str, str]]:
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error args: {e.args}")
         raise HTTPException(status_code=500, detail="Failed to fetch chat history")
+
 
  
 # Include router

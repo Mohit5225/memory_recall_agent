@@ -36,7 +36,7 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
         </div>
       )}
       {messages.map((message, index) => {
-        console.log(`Rendering message ${index}:`, message);
+        
         return (
           <ChatBubble
             key={index}

@@ -7,8 +7,8 @@ import { useSelector } from 'react-redux';
 
 interface ChatMessage {
 
-  role: 'user' | 'assistant';
-  content: string;
+  sender: 'user' | 'assistant';
+  text: string;
 }
 
 const Dashboard: React.FC = () => {
@@ -52,7 +52,7 @@ const Dashboard: React.FC = () => {
       const data = await response.json();
       console.log("Fetched messages:", data);
       console.log("Data length:", data.length);
-      console.log("First message:", data[0]);
+       
       // Use backend data directly since it now has correct role/content format
       setChatHistory(data);
       console.log("Chat history state updated");
@@ -70,8 +70,8 @@ const Dashboard: React.FC = () => {
 const handleSendMessage = async () => {
   if (!message.trim()) return;
   setIsLoading(true);
-  
-  const newMessage = { role: 'user' as const, content: message };
+
+  const newMessage = { sender : 'user' as const, text: message };
   setChatHistory(prev => [...prev, newMessage]);
   setMessage('');
 
@@ -94,8 +94,8 @@ const handleSendMessage = async () => {
 
     const data = await response.json();
     setChatHistory(prev => [...prev, {
-      role: 'assistant',
-      content: data.response
+      sender : 'assistant',
+      text: data.response
     }]);
   } catch (error) {
     console.error('Failed to send message:', error);

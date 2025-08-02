@@ -17,6 +17,8 @@ from typing import List, Optional, Dict, Any, Literal
 import logging
 from datetime import datetime # Ensure datetime is imported
 import asyncio
+from bson import ObjectId  # Import ObjectId for MongoDB document IDs
+from hashlib import sha1  # Import sha1 for deterministic ID generation
 
 from src.agent import state
 
@@ -27,52 +29,47 @@ CLARIFICATION_CONTEXT = 7
 
 # --- Helper Functions ---
 
+def _generate_deterministic_id(msg: dict) -> ObjectId:
+    key = f"{msg['user_id']}|{msg.get('content','')}"
+    return ObjectId(sha1(key.encode()).digest()[:12])
+
 async def save_messages_atomically(user_id: str, messages: List[Message]) -> bool:
-    """Save multiple messages atomically in a single transaction with proper status tracking."""
-    local_mongo_client: Optional[AsyncIOMotorClient] = None
-    try:
-        local_mongo_client = await get_mongo_client()
-
-        if local_mongo_client is None:
-            logger.error("SAVE_MESSAGES_ATOMICALLY: get_mongo_client() returned None. This should not happen if get_mongo_client is implemented correctly to raise DatabaseError on failure.")
-            return False
-
-        # Get the messages collection directly from the obtained client and DB_NAME
-        collection = local_mongo_client[DB_NAME]["messages"]
-
-        logger.info(f"SAVE_MESSAGES_ATOMICALLY: Attempting to start session with client instance: {repr(local_mongo_client)}")
-        async with await local_mongo_client.start_session() as session:
-            async with session.start_transaction():
-                for msg in messages:
-                    msg_dict = msg.model_dump()
-                    msg_dict["user_id"] = user_id
-                    
-                    # Ensure processing timestamps are set
-                    if msg.processing_status == ProcessingStatus.PROCESSING:
-                        msg_dict["last_attempt"] = datetime.utcnow()
-                    elif msg.processing_status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED]:
-                        msg_dict["last_attempt"] = datetime.utcnow()
-                        if msg.processing_status == ProcessingStatus.FAILED and not msg.error_details:
-                            logger.warning(f"Message marked as FAILED but no error_details provided")
-                    
-                    result = await collection.insert_one(
-                        msg_dict,
-                        session=session
-                    )
-                    if not result.inserted_id:
-                        # If any insert fails, the transaction will roll back
-                        logger.error("Failed to insert message in transaction")
-                        return False
-                
-                # All messages saved successfully within transaction
-                logger.debug(f"Successfully saved {len(messages)} messages atomically for user {user_id}")
-                return True
-                
-    except Exception as e:
-        logger.error(f"Unexpected error in atomic message save: {e}", exc_info=True)
-        logger.error(f"SAVE_MESSAGES_ATOMICALLY (Exception): local_mongo_client was {repr(local_mongo_client)} at the time of exception.")
+    client: Optional[AsyncIOMotorClient] = await get_mongo_client()
+    if not client:
+        logger.error("get_mongo_client() returned None.")
         return False
 
+    coll = client[DB_NAME]["messages"]
+    try:
+        async with await client.start_session() as session:
+            async with session.start_transaction():
+                for msg in messages:
+                    md = msg.model_dump()
+                    md["user_id"] = user_id
+
+                    # update last_attempt whenever we transition out of PENDING
+                    if msg.processing_status in (
+                        ProcessingStatus.PROCESSING,
+                        ProcessingStatus.COMPLETED,
+                        ProcessingStatus.FAILED
+                    ):
+                        md["last_attempt"] = datetime.utcnow()
+
+                    # 1) generate a consistent _id so we can upsert
+                    if not md.get("_id"):
+                        md["_id"] = _generate_deterministic_id(md)
+
+                    # 2) upsert by that _id
+                    await coll.update_one(
+                        {"_id": md["_id"]},
+                        {"$set": md},
+                        upsert=True,
+                        session=session
+                    )
+        return True
+    except Exception as exc:
+        logger.error(f"Transaction failed: {exc}", exc_info=True)
+        return False
 def format_message_history(messages: List[Message], limit: Optional[int] = None) -> str:
     """Format message history for LLM context with proper windowing."""
     if not messages:
