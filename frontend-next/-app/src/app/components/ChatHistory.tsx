@@ -8,6 +8,7 @@ export interface ChatHistoryProps {
   isLoading: boolean
   className?: string
 }
+
 export default function ChatHistory({ messages, isLoading, className }: ChatHistoryProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null)
 
@@ -26,26 +27,36 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
     <div
       ref={scrollAreaRef}
       className={cn(
-        'flex flex-col space-y-4 overflow-y-auto p-4',
+        'relative flex flex-col space-y-4 overflow-y-auto p-4', // Added 'relative'
         className
       )}
     >
-      {messages.length === 0 && !isLoading && (
-        <div className="text-center text-gray-500 py-8">
-          No messages yet. Start a conversation!
-        </div>
-      )}
-      {messages.map((message, index) => {
+      {/* Radial Glow Background */}
+      <div
+        className="absolute inset-0 z-0 pointer-events-none"
+        style={{
+          backgroundImage: "radial-gradient(circle 500px at 50% 200px, #3e3e3e, transparent)",
+        }}
+      />
+      
+      {/* Message Content */}
+      <div className="relative z-10">
+        {messages.length === 0 && !isLoading && (
+          <div className="text-center text-gray-500 py-8">
+            No messages yet. Start a conversation!
+          </div>
+        )}
         
-        return (
+        {messages.map((message, index) => (
           <ChatBubble 
             key={index}
             sender={message.sender}
             text={message.text}
           />
-        );
-      })}
-      {isLoading && <LoadingBubble />}
+        ))}
+        
+        {isLoading && <LoadingBubble />}
+      </div> {/* This closing tag was misplaced */}
     </div>
   )
 }

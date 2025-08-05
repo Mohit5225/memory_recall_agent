@@ -1,8 +1,7 @@
 # src/core/intent_parser.py
 from src.llm.gemini import get_gemini_response_async
 import logging
-from typing import Optional, Dict, Any
-
+from typing import Optional, Dict, Any, Union , Mapping 
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +41,11 @@ User Input: {user_input}
 Intent Category:"""
 
 
-async def parse_user_intent(user_input: str, state: Optional[dict] = None, message_history: Optional[str] = None) -> str:
+async def parse_user_intent(
+    user_input: str,
+    state: Optional[Mapping[str, Any]] = None,
+    message_history: Optional[str] = None
+) -> str:
     """
     Uses the LLM to classify the user's input into a predefined intent category.
     If the intent is unclear, engages in iterative clarification with the user.
@@ -91,7 +94,9 @@ async def parse_user_intent(user_input: str, state: Optional[dict] = None, messa
         return await handle_unclear_intent(user_input, state)
     
 
-async def handle_unclear_intent(user_input: str, state: Optional[dict]) -> str:
+from typing import Mapping
+
+async def handle_unclear_intent(user_input: str, state: Optional[Mapping[str, Any]]) -> str:
     """
     Handles cases where the intent is unclear by using rule-based fallback first,
     then engaging clarification if needed.
@@ -105,15 +110,21 @@ async def handle_unclear_intent(user_input: str, state: Optional[dict]) -> str:
     """
     if state:
         clarification_prompt = "I couldn't understand your request. Could you clarify what you want to do?"
+        # Convert state to a mutable dict if it's not already
+        if not isinstance(state, dict):
+            state = dict(state)
         state['llm_response'] = clarification_prompt
         logger.info("Engaging user for clarification.")
         # Simulate sending clarification to the user and receiving a response
         # In a real implementation, this would involve a back-and-forth interaction
         clarified_input = await get_user_clarification(state)
         return await parse_user_intent(clarified_input, state)
+    # If state is None, fallback to 'other' intent
+    logger.warning("State is None during unclear intent handling. Returning 'other'.")
+    return "other"
 
 
-async def get_user_clarification(state: dict) -> str:
+async def get_user_clarification(state: Mapping[str, Any]) -> str:
     """
     Simulates getting clarification from the user. Replace with actual user interaction logic.
 

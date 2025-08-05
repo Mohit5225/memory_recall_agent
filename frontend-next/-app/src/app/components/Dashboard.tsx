@@ -225,12 +225,12 @@ const handleSendMessage = async () => {
   );
 
   return (
-    <div className="min-h-screen flex bg-[#1A1A1A] text-[#F1F5F9]/98">
+    <div className="min-h-screen flex bg-[#020617] text-[#F1F5F9]/98">
       {/* Left Sidebar */}
       <aside
         className={cn(
           // Sidebar: Deep Space Black gradient, border Meteor Gray, text Lunar White
-          'fixed top-0 left-0 h-full w-[35vw] bg-gradient-to-b from-[#1A1A1A] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-r border-[#4B5563] shadow-2xl',
+          'fixed top-0 left-0 h-full w-[35vw] bg-gradient-to-b from-[#020617] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-r border-[#4B5563] shadow-2xl',
           leftSidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -261,7 +261,7 @@ const handleSendMessage = async () => {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search memory slots"
             // Search Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
-            className="w-full pl-10 p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-inner transition-all duration-200"
+            className="w-full pl-10 p-3 bg-[#020617] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-inner transition-all duration-200"
           />
         </div>
         <h3 className="text-sm font-semibold mb-3 text-[#F1F5F9] uppercase tracking-wide">Library</h3>
@@ -290,7 +290,7 @@ const handleSendMessage = async () => {
             type="text"
             placeholder="Add topic"
             // Add topic input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
-            className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+            className="w-full p-3 bg-[#020617] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
             onKeyPress={(e) => e.key === 'Enter' && addMemorySlot(e.currentTarget.value)}
           />
         </div>
@@ -307,7 +307,7 @@ const handleSendMessage = async () => {
         )}
       >
         {/* Navbar */}
-        <nav className="sticky top-0 z-20 bg-[#1A1A1A] p-4 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
+        <nav className="sticky top-0 z-20 bg-[#020617] p-4 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
             className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
@@ -328,11 +328,11 @@ const handleSendMessage = async () => {
         <ChatHistory
           messages={chatHistory}
           isLoading={isLoading}
-          className="flex-1 bg-[#1A1A1A] rounded-lg overflow-y-auto"
+          className="flex-1 bg-[#020617] rounded-lg overflow-y-auto"
         />
 
         {/* Input Area */}
-        <div className="p-4 bg-[#1A1A1A] sticky bottom-0 border-t border-[#5F6483] shadow-lg">
+        <div className="p-4 bg-[#020617] sticky bottom-0 rounded-5xl border-t border-[#5F6483] shadow-lg">
           <div className="w-full flex items-center max-w-3xl mx-auto">
             <input
               type="text"
@@ -340,14 +340,14 @@ const handleSendMessage = async () => {
               onChange={(e) => setMessage(e.target.value)}
               placeholder="Ask anything..."
               // Input: Deep Space Black bg, Cosmic Gray border, Lunar White placeholder at 50%, Misty Nebula focus
-              className="flex-1 p-3 bg-[#1A1A1A] rounded-l-lg border border-[#5F6483] focus:outline-none focus:ring-2 focus:ring-[#9575CD]/50 focus:border-transparent text-[#F1F5F9]/98 placeholder:text-[#F1F5F9]/50 transition-all duration-200"
+              className="flex-1  p-4 bg-[#020617] rounded-l-lg border border-[#5F6483] focus:outline-none focus:ring-2 focus:ring-[#9575CD]/50 focus:border-transparent text-[#F1F5F9]/98 placeholder:text-[#F1F5F9]/50 transition-all duration-200"
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
             />
             <button
               onClick={handleSendMessage}
-              className="p-3 bg-gradient-to-b from-[#7C3AED] to-[#5F6483] rounded-r-lg hover:opacity-90 hover:blur-[0.2px] transition-all duration-200 shadow-lg"
+              className="p-3.5 bg-gradient-to-b from-[#7C3AED] to-[#5F6483] rounded-r-lg hover:opacity-90 hover:blur-[0.2px] transition-all duration-200 shadow-lg"
             >
-              <Send size={20} className="text-[#F1F5F9]" />
+              <Send size={29} className="text-[#F1F5F9]" />
             </button>
           </div>
         </div>
@@ -357,7 +357,7 @@ const handleSendMessage = async () => {
       <aside
         className={cn(
           // Settings Sidebar: Deep Space Black gradient, border Meteor Gray, text Lunar White
-          'fixed top-0 right-0 h-full w-[35vw] bg-gradient-to-b from-[#1A1A1A] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-l border-[#4B5563] shadow-2xl',
+          'fixed top-0 right-0 h-full w-[35vw] bg-gradient-to-b from-[#020617] to-[#2D2D2D] text-[#F1F5F9] p-4 z-30 transition-all duration-300 backdrop-blur-md border-l border-[#4B5563] shadow-2xl',
           rightSidebarOpen ? 'translate-x-0' : 'translate-x-full'
         )}
       >
@@ -376,7 +376,7 @@ const handleSendMessage = async () => {
           onChange={(e) => setCustomInstructions(e.target.value)}
           placeholder="How should I respond?"
           // Textarea: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
-          className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 min-h-[150px] resize-y transition-all duration-200"
+          className="w-full p-3 bg-[#020617] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 min-h-[150px] resize-y transition-all duration-200"
         />
         <h3 className="text-sm font-semibold mt-6 mb-3 text-[#F1F5F9] uppercase tracking-wide">API Settings</h3>
         <input
@@ -385,7 +385,7 @@ const handleSendMessage = async () => {
           onChange={(e) => setApiKey(e.target.value)}
           placeholder="Enter API key"
           // API Key Input: Deep Space Black bg, Meteor Gray border, Lunar White placeholder at 50%, Nebula Purple focus
-          className="w-full p-3 bg-[#1A1A1A] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
+          className="w-full p-3 bg-[#020617] rounded-lg border border-[#4B5563] focus:outline-none focus:ring-2 focus:ring-[#7C3AED]/50 focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 transition-all duration-200"
         />
         <button
           onClick={validateApiKey}
