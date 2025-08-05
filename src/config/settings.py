@@ -51,3 +51,12 @@ OAUTH_RATE_LIMIT_WINDOW = int(os.getenv("OAUTH_RATE_LIMIT_WINDOW", "300"))  # 5 
 
 OTP_REDIS_URL = os.getenv("OTP_REDIS_URL")  # e.g. "https://integral-mantis-55410.upstash.io"
 OTP_REDIS_TOKEN = os.getenv("OTP_REDIS_TOKEN")  # e.g. "AdhyAAIjcDE0ZTk5YjVkMGJjYzE0ZDU2OGJkMTcyMDQyMjY3NWVmM3AxMA"
+ 
+OPENROUTER_SECRET_KEY = os.getenv("OPENROUTER_SECRET_KEY")
+
+OPENROUTER_FALLBACK_MODELS = [
+    "qwen/qwen3-235b-a22b:free",
+    # "moonshotai/kimi-dev-72b:free", # Add more models here later
+    # "qwen/qwen-2.5-coder-32b-instruct:free",
+    # "deepseek/deepseek-r1-0528:free",
+]

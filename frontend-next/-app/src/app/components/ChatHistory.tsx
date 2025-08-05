@@ -38,7 +38,7 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
       {messages.map((message, index) => {
         
         return (
-          <ChatBubble
+          <ChatBubble 
             key={index}
             sender={message.sender}
             text={message.text}

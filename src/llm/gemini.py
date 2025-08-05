@@ -6,6 +6,9 @@ from src.config.settings import GOOGLE_API_KEY, LLM_MODEL_NAME
 from datetime import datetime
 from typing import Optional, Tuple
 import json
+from src.llm.openrouter import get_openrouter_response_async
+from src.config.settings import OPENROUTER_FALLBACK_MODELS
+
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -51,7 +54,7 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
         "SEXUALLY_EXPLICIT": "BLOCK_MEDIUM_AND_ABOVE",
         "DANGEROUS_CONTENT": "BLOCK_MEDIUM_AND_ABOVE"
     }
-
+    gemini_failed = False
     for attempt in range(max_retries):
         try:
             if attempt > 0:
@@ -128,10 +131,27 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
             context["processing_status"] = "failed"
             context["error_details"] = error_msg
             context["error_type"] = "unexpected"
-            return None, context  # Don't retry on unknown errors
+            gemini_failed = True 
+            break
+    if gemini_failed:
+        logger.info("Gemini failed after all retries. Initiating OpenRouter fallback...")
+        for model_name in OPENROUTER_FALLBACK_MODELS:
+            # We pass the original prompt, not any intermediate state.
+            fallback_text, fallback_context = await get_openrouter_response_async(prompt, model_name , message_context)
+            
+            if fallback_text is not None:
+                logger.info(f"✅ Fallback to OpenRouter model '{model_name}' succeeded.")
+                # Return the successful fallback response directly
+                return fallback_text, fallback_context
+            else:
+                logger.warning(f"❌ Fallback to OpenRouter model '{model_name}' failed. Trying next model if available.")
+                # Update the main context with the latest failure details for the final report
+                context.update(fallback_context)
 
-    # Should never reach here due to returns in the loop
+    # If we reach here, it means Gemini and ALL fallback models have failed.
+    # The 'context' dictionary now holds the details of the *last* failed attempt.
+    logger.error("All LLM providers (Gemini and OpenRouter fallbacks) failed.")
+    context["error_details"] = "All primary and fallback LLM providers failed."
+    context["error_type"] = "complete_fallback_failure"
     context["processing_status"] = "failed"
-    context["error_details"] = "Maximum retries exceeded"
-    context["error_type"] = "max_retries"
     return None, context

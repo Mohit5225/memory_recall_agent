@@ -3,6 +3,7 @@ from src.llm.gemini import get_gemini_response_async
 import logging
 from typing import Optional, Dict, Any
 
+
 logger = logging.getLogger(__name__)
 
 # --- Prompt Engineering for Intent Parsing ---
@@ -10,14 +11,24 @@ logger = logging.getLogger(__name__)
 # This is crucial for the agent to understand *what* the user wants to do.
 INTENT_PARSING_PROMPT_TEMPLATE = """
 You are an intent classification system for an AI agent.
-Your task is to categorize the user's request into one of the following predefined intents:
+Your task is to categorize the user's request into one of the following predefined intents which can set reminders , adopt to preferances of users and send reminders on whatsapp :
 
 - config_update: The user wants to change the agent's configuration (topic, style, tone, length). Only use this when they explicitly request to change settings.
+EXAMPLES:
+   * "Make your responses more technical"
+   * "Change your tone to professional"
+   * "Write with more analogies"
+   * "Make explanations shorter"
 - schedule_request: The user wants to set up, modify, or ask about reminder scheduling. Also use this when the user is responding to scheduling clarification questions.
+EXAMPLES:
+   * "Remind me about React hooks daily at 5:51"
+   * "Can you set up a Python reminder every Tuesday?"
+   * "Change my reminder time to 8am"
+   * "I want React hooks instead of Linux commands"
 - general_query: The user is asking a question or making a statement that is not a config update or schedule request. This includes asking questions about the reminder topic.
 - clarification_request: The user is asking for clarification about what information is needed or what they should do next.
 - acknowledge: The user is simply acknowledging something or saying thanks (e.g., "ok", "got it", "thanks").
-- other: The user's request does not fit clearly into any of the above categories.
+- other: The user's request does not fit clearly into any of the above categories so ask for clarification explictly.
 
 Previous conversation context:
 {message_history}
@@ -78,38 +89,7 @@ async def parse_user_intent(user_input: str, state: Optional[dict] = None, messa
     except Exception as e:
         logger.error(f"Error during intent parsing for input '{user_input[:50]}...': {e}", exc_info=True)
         return await handle_unclear_intent(user_input, state)
-
-
-def rule_based_intent_fallback(user_input: str) -> str:
-    """
-    Rule-based fallback when LLM fails. Uses keyword matching for basic intent detection.
-    90% confidence this catches common patterns when LLM quota is exhausted.
-    """
-    input_lower = user_input.lower()
     
-    # Schedule request patterns
-    if any(keyword in input_lower for keyword in ["remind", "schedule", "daily", "weekly", "monthly", "at", "every", "notification"]):
-        logger.info("Rule-based fallback detected: schedule_request")
-        return "schedule_request"
-    
-    # Config update patterns  
-    if any(keyword in input_lower for keyword in ["change", "update", "configure", "set", "tone", "style", "topic"]):
-        logger.info("Rule-based fallback detected: config_update") 
-        return "config_update"
-    
-    # Acknowledgment patterns
-    if any(keyword in input_lower for keyword in ["thanks", "thank you", "ok", "okay", "got it", "understood"]):
-        logger.info("Rule-based fallback detected: acknowledge")
-        return "acknowledge"
-    
-    # Default to general_query for questions
-    if any(keyword in input_lower for keyword in ["what", "how", "why", "when", "where", "?"]):
-        logger.info("Rule-based fallback detected: general_query")
-        return "general_query"
-    
-    logger.info("Rule-based fallback detected: other")
-    return "other"
-
 
 async def handle_unclear_intent(user_input: str, state: Optional[dict]) -> str:
     """
@@ -123,16 +103,14 @@ async def handle_unclear_intent(user_input: str, state: Optional[dict]) -> str:
     Returns:
         A string representing the clarified intent category.
     """
-    logger.info("Engaging user for clarification.")
-    
-    # Try rule-based fallback first (95% confidence this works for your input)
-    fallback_intent = rule_based_intent_fallback(user_input)
-    if fallback_intent != "other":
-        logger.info(f"Rule-based fallback successful: {fallback_intent}")
-        return fallback_intent
-    
-    # If rule-based fails, default to other and let that node handle clarification
-    return "other"
+    if state:
+        clarification_prompt = "I couldn't understand your request. Could you clarify what you want to do?"
+        state['llm_response'] = clarification_prompt
+        logger.info("Engaging user for clarification.")
+        # Simulate sending clarification to the user and receiving a response
+        # In a real implementation, this would involve a back-and-forth interaction
+        clarified_input = await get_user_clarification(state)
+        return await parse_user_intent(clarified_input, state)
 
 
 async def get_user_clarification(state: dict) -> str:

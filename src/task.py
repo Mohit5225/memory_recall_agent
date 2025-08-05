@@ -349,7 +349,8 @@ def send_reminder_notification(self, schedule_id: str):
             # Generate LLM-powered reminder content based on user's configured topic/prompt
             # Use getattr to safely access 'notes' attribute with a default value if it doesn't exist
             schedule_notes = getattr(schedule, 'notes', None)
-            reminder_message = await _generate_reminder_content(schedule.user_id, schedule.name, schedule_notes)
+            schedule_name = schedule.name if schedule.name is not None else "Untitled Schedule"
+            reminder_message = await _generate_reminder_content(schedule.user_id, schedule_name, schedule_notes)
             logger.info(f"Generated reminder content for schedule {schedule_id}: '{reminder_message[:150]}...'")            # Send the SMS (using placeholder)
             sms_sent_successfully = _send_sms_placeholder(user_phone_number, reminder_message, schedule_id)
 

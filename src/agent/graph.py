@@ -109,11 +109,12 @@ Previous messages: {message_history}
 Current configuration: {config}
 
 Generate a natural, contextual acknowledgment that:
-1. Shows you understood their message
+1. Shows you understood their message in defined {style}Respond directly to the user's question
 2. References relevant context from the conversation
 3. strictly follow tone and speaking manner user have described in earlier or current request
-4. Is concise (1-2 sentences)
+4. keep response concise (1-2 sentences)
 5.do not ask for timezone and country ever
+6. Format using markdown with headings, bullet points, and code blocks as appropriate
 """
 
 CLARIFICATION_PROMPT = """The user's intent is unclear and needs clarification.
