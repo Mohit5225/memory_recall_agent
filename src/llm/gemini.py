@@ -102,7 +102,8 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
                 context["processing_status"] = "failed"
                 context["error_details"] = error_msg
                 context["error_type"] = "resource_exhausted"
-                return None, context
+                gemini_failed = True 
+                break
             continue  # Will retry with backoff
 
         except exceptions.DeadlineExceeded as e:
@@ -134,6 +135,7 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
             gemini_failed = True 
             break
     if gemini_failed:
+        gemini_failed = True
         logger.info("Gemini failed after all retries. Initiating OpenRouter fallback...")
         for model_name in OPENROUTER_FALLBACK_MODELS:
             # We pass the original prompt, not any intermediate state.

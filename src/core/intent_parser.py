@@ -25,17 +25,16 @@ EXAMPLES:
    * "Change my reminder time to 8am"
    * "I want React hooks instead of Linux commands"
 - general_query: The user is asking a question or making a statement that is not a config update or schedule request. This includes asking questions about the reminder topic.
-- clarification_request: The user is asking for clarification about what information is needed or what they should do next.
-- acknowledge: The user is simply acknowledging something or saying thanks (e.g., "ok", "got it", "thanks").
-- other: The user's request does not fit clearly into any of the above categories so ask for clarification explictly.
+- clarification_request: The user's request does not fit clearly into any of the above categories so ask for clarification explictly , but do not over burden the user with too many questions , if they have given topic ,  timing of day , personality traits for you , that is mostly enough , help them narrow down their request when they are ambigous , but do not annoy otherwise. always maintain the tone they have requested.
 
 Previous conversation context:
 {message_history}
 
-Analyze the user's input carefully, considering the conversation context above. If the user is asking what information is needed or what to do next, classify it as "clarification_request".
+Analyze the user's input carefully, considering the conversation context above.  
 
-Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation.
+Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation but do not ask user explicitly for category, instead use the context to infer what they want.   
 
+do not annoy them if they have already given you enough information.
 User Input: {user_input}
 
 Intent Category:"""

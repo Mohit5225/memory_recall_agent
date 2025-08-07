@@ -168,8 +168,13 @@ async def call_intent_parser( state: AgentState) -> AgentState:
     messages = state.get('messages', [])
     context_window = state.get('context_window', CLARIFICATION_CONTEXT)
     message_history = format_message_history(messages, context_window)
-    
-    parsed_intent = await parse_user_intent(state['user_input'], dict(state), message_history)
+    user_input = messages[-1].content if messages else ""
+    parsed_intent = await parse_user_intent(
+
+        user_input=user_input,
+        state=state,
+        message_history=message_history
+    )
     logger.info(f"Intent Parsing Node identified intent: '{parsed_intent}'")
     
     state['parsed_intent'] = parsed_intent or "other"
@@ -191,7 +196,8 @@ async def handle_general_query(state: AgentState) -> AgentState:
             user_id=user_id,
             config=config,
             message_history=message_history,
-            query=user_query
+            query=user_query,
+            context_window=context_window
         )
         
         llm_response, context = await get_gemini_response_async(prompt)
@@ -427,12 +433,14 @@ async def handle_other_intent(state: AgentState) -> AgentState:
     context_window = state.get('context_window', CLARIFICATION_CONTEXT)
     message_history = format_message_history(messages, context_window)
     user_id = state['user_id']
-    
+    config = state.get('current_config_prompt', '')
     try:
         prompt = CLARIFICATION_PROMPT.format(
             user_id=user_id,
             query=state['user_input'],
-            message_history=message_history
+            message_history=message_history,
+            config=config,
+            
         )
         
         llm_response, context = await get_gemini_response_async(prompt)
@@ -680,6 +688,7 @@ def build_agent_graph():
     workflow.add_node("parse_intent", call_intent_parser)
     workflow.add_node("tweak_config", call_tweak_agent)
     workflow.add_node("schedule", call_scheduling_logic)
+    workflow.add_node("handle_clarification_request", handle_other_intent)  # Add this handler
     workflow.add_node("general_query", handle_general_query)
     workflow.add_node("acknowledge", handle_acknowledge)
     workflow.add_node("other", handle_other_intent)
@@ -707,6 +716,7 @@ def build_agent_graph():
         {
             "config_update": "tweak_config",
             "schedule_request": "schedule",
+             "clarification_request": "handle_clarification_request",
             "general_query": "general_query",
             "acknowledge": "acknowledge",
             "other": "other"
@@ -716,6 +726,7 @@ def build_agent_graph():
     # Connect simple handlers directly to report_outcome
     workflow.add_edge("general_query", "report_outcome")
     workflow.add_edge("acknowledge", "report_outcome")
+    workflow.add_edge("handle_clarification_request", "report_outcome")
     workflow.add_edge("other", "report_outcome")
 
     # Connect tweak_config outcomes with defensive routing
