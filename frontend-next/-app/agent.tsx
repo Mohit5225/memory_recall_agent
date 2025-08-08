@@ -52,9 +52,9 @@ const AgentPage: React.FC = () => {
   return (
     <div className={cn(darkMode ? 'dark' : '', 'min-h-screen flex flex-col')}>      
       {/* Navbar */}
-      <nav className="sticky top-0 z-10 bg-white dark:bg-gray-900 shadow-md flex justify-between items-center px-4 py-2">
+      <nav className="sticky top-0 z-10 bg-white dark:bg-gray-900 shadow-md flex justify-between items-center px-0.5 py-1">
         <div className="text-xl font-semibold">Memory Recaller Agent</div>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
           <button
             onClick={() => setDarkMode(!darkMode)}
             className="p-2 rounded-full bg-gray-200 dark:bg-gray-700"

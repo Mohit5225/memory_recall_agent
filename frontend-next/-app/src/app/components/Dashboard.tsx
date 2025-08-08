@@ -307,7 +307,7 @@ const handleSendMessage = async () => {
         )}
       >
         {/* Navbar */}
-        <nav className="sticky top-0 z-20 bg-[#020617] p-4 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
+        <nav className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
             className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
@@ -328,29 +328,29 @@ const handleSendMessage = async () => {
         <ChatHistory
           messages={chatHistory}
           isLoading={isLoading}
-          className="flex-1 bg-[#020617] rounded-lg overflow-y-auto"
-        />
+          className="flex-1 bg-[#020617] rounded-lg overflow-y-auto pb-24"></ChatHistory>
 
         {/* Input Area */}
-        <div className="p-4 bg-[#020617] sticky bottom-0 rounded-5xl border-t border-[#5F6483] shadow-lg">
-          <div className="w-full flex items-center max-w-3xl mx-auto">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask anything..."
-              // Input: Deep Space Black bg, Cosmic Gray border, Lunar White placeholder at 50%, Misty Nebula focus
-              className="flex-1  p-4 bg-[#020617] rounded-l-lg border border-[#5F6483] focus:outline-none focus:ring-2 focus:ring-[#9575CD]/50 focus:border-transparent text-[#F1F5F9]/98 placeholder:text-[#F1F5F9]/50 transition-all duration-200"
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            />
-            <button
-              onClick={handleSendMessage}
-              className="p-3.5 bg-gradient-to-b from-[#7C3AED] to-[#5F6483] rounded-r-lg hover:opacity-90 hover:blur-[0.2px] transition-all duration-200 shadow-lg"
-            >
-              <Send size={29} className="text-[#F1F5F9]" />
-            </button>
-          </div>
-        </div>
+
+<div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 w-full max-w-2xl px-4">
+  <div className="relative">
+    <input 
+      type="text"
+      value={message}
+      onChange={(e) => setMessage(e.target.value)}
+      placeholder="Ask anything..."
+      className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base"
+      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+    />
+    <button
+      onClick={handleSendMessage}
+      disabled={!message.trim()}
+      className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-all duration-200 shadow-sm"
+    >
+      <Send size={18} className="text-[#F1F5F9]" />
+    </button>
+  </div>
+</div>
       </div>
 
       {/* Right Sidebar */}

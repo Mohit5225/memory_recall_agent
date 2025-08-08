@@ -27,7 +27,7 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
     <div
       ref={scrollAreaRef}
       className={cn(
-        'relative flex flex-col space-y-4 overflow-y-auto p-4', // Added 'relative'
+        'relative flex flex-col space-y-6.5 overflow-y-auto p-4 pb-32', // Added 'relative'
         className
       )}
     >
@@ -40,7 +40,7 @@ export default function ChatHistory({ messages, isLoading, className }: ChatHist
       />
       
       {/* Message Content */}
-      <div className="relative z-10">
+      <div className="relative z-10 flex flex-col space-y-6.5">
         {messages.length === 0 && !isLoading && (
           <div className="text-center text-gray-500 py-8">
             No messages yet. Start a conversation!
