@@ -19,7 +19,9 @@ from datetime import datetime # Ensure datetime is imported
 import asyncio
 from bson import ObjectId  # Import ObjectId for MongoDB document IDs
 from hashlib import sha1  # Import sha1 for deterministic ID generation
-
+from src.llm.openrouter import get_openrouter_chain_response_async
+from src.config.settings import OPENROUTER_FALLBACK_MODELS, OPENROUTER_SELF_DESCRIPTION_MAX_RETRIES
+from src.core.self_description import SELF_DESCRIPTION_TEMPLATE, STATIC_SELF_DESCRIPTION_FALLBACK
 from src.agent import state
 
 logger = logging.getLogger(__name__)
@@ -425,6 +427,50 @@ async def handle_acknowledge(state: AgentState) -> AgentState:
             "messages": messages + new_messages
         }
 
+async def handle_self_description(state: AgentState) -> AgentState:
+    """
+    Handles self_description intent using OpenRouter multi-model fallback chain.
+    Injects message history for context; falls back to static narrative if all fail.
+    """
+    user_id = state['user_id']
+    user_query = state['user_input']
+    # Gather recent messages if present
+    messages: List[Message] = state.get("messages", [])  # type: ignore
+    history_text = ""
+    if messages:
+        try:
+            history_text = format_message_history(messages, limit=DEFAULT_CONTEXT_WINDOW)
+        except Exception as e:
+            logger.warning(f"[SELF_DESC] Failed to format history: {e}")
+
+    system_prompt = SELF_DESCRIPTION_TEMPLATE
+    user_prompt = f"User identity/purpose probe:\n{user_query}\nRespond per system identity discipline."
+
+    llm_text, context = await get_openrouter_chain_response_async(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        message_history=history_text,
+        model_sequence=OPENROUTER_FALLBACK_MODELS,
+        max_retries_per_model=OPENROUTER_SELF_DESCRIPTION_MAX_RETRIES
+    )
+
+    if not llm_text:
+        logger.error("[SELF_DESC] Falling back to static self-description payload.")
+        # Personalize fallback slightly with user tail if possible
+        tail = (user_query[:120] + "...") if len(user_query) > 120 else user_query
+        fallback = STATIC_SELF_DESCRIPTION_FALLBACK + f"\n\n(Original probe context captured: \"{tail}\")"
+        state['llm_response'] = fallback
+        state['processing_status'] = ProcessingStatus.COMPLETED
+        state['error_details'] = context.get("error_details") or ""
+        state['llm_meta'] = context
+        return state
+
+    state['llm_response'] = llm_text
+    state['processing_status'] = ProcessingStatus.COMPLETED
+    state['llm_meta'] = context
+    return state
+
+
 async def handle_other_intent(state: AgentState) -> AgentState:
     """Handles unclear intents with standardized message handling."""
     logger.info(f"--- Handling Other Intent for user: {state['user_id']} ---")
@@ -655,6 +701,9 @@ async def call_scheduling_logic(state: AgentState)-> Dict[str, Any] :
             "final_outcome": "An unexpected error occurred while processing your schedule request.",
             "llm_response": "An unexpected error occurred while processing your schedule request."
         }
+
+
+
 
 async def report_outcome_node(state: AgentState) -> Dict[str, Any]:
     """

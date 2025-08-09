@@ -6,7 +6,7 @@ from src.config.settings import GOOGLE_API_KEY, LLM_MODEL_NAME
 from datetime import datetime
 from typing import Optional, Tuple
 import json
-from src.llm.openrouter import get_openrouter_response_async
+from src.llm.openrouter import get_openrouter_chain_response_async
 from src.config.settings import OPENROUTER_FALLBACK_MODELS
 
 
@@ -139,7 +139,12 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
         logger.info("Gemini failed after all retries. Initiating OpenRouter fallback...")
         for model_name in OPENROUTER_FALLBACK_MODELS:
             # We pass the original prompt, not any intermediate state.
-            fallback_text, fallback_context = await get_openrouter_response_async(prompt, model_name , message_context)
+            fallback_text, fallback_context  = await get_openrouter_chain_response_async(
+            prompt,  # system_prompt
+            prompt,  # user_prompt (or whatever the user actually said)
+            None,    # message_history (or a string if you have it)
+            model_sequence=[model_name]
+)
             
             if fallback_text is not None:
                 logger.info(f"✅ Fallback to OpenRouter model '{model_name}' succeeded.")

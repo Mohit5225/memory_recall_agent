@@ -74,6 +74,10 @@
   border-bottom: 1px solid var(--meteor-gray);
   box-shadow: 0 2px 8px rgba(26, 26, 26, 0.1);
   color: var(--lunar-white);
+   padding: 0.5rem 1rem; 
+    height: auto; 
+
+  
 }
 .logoTitle {
   color: var(--lunar-white);

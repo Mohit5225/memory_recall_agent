@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 # This prompt instructs the LLM to classify user input into predefined categories.
 # This is crucial for the agent to understand *what* the user wants to do.
 INTENT_PARSING_PROMPT_TEMPLATE = """
+
 You are an intent classification system for an AI agent.
 Your task is to categorize the user's request into one of the following predefined intents which can set reminders , adopt to preferances of users and send reminders on whatsapp :
-
+-- self_description: The user is asking about the agent's identity, purpose, creator, capabilities, boundaries, or is trying to test, confuse, or challenge what the agent is. This includes direct, indirect, sarcastic, adversarial, or meta questions about "what are you", "who made you", "are you a bot", "are you sentient", "what do you do", etc. If the user's message is about the agent itself, its function, or its limits, classify as self_description. Do not rely on keywords—use reasoning and context.
 - config_update: The user wants to change the agent's configuration (topic, style, tone, length). Only use this when they explicitly request to change settings.
 EXAMPLES:
    * "Make your responses more technical"
@@ -31,10 +32,17 @@ Previous conversation context:
 {message_history}
 
 Analyze the user's input carefully, considering the conversation context above.  
+RULES : 1)IF USER PROVIDES TIMING AND ASK IT TO CHANGE PROVIDE UPDATED CONFIG DETAILS AND CLASSIFY IT AS schedule_request
+2)IF USER PROVIDES EVERYTHING EXCEPT REQUEST OF TIMING CHANGE CLASSIFY IT AS config_update
+3) END THE CONVO POLITELY AFTER YOU HAVE TIMING , TOPIC , PERSONALITY TRAITS , DO NOT CONTINUE BY MORE QUESTIONS IT IS NOT HELPFUL IT IS ANNOYING 
+4) DO NOT ASK FOR CONSENT IF USER HAS MENTIONED THEIR WISHES WITH CLARITY , THIS IS ANNOYING FOR THEM
 
 Respond with ONLY the single intent category name (e.g., "config_update", "schedule_request", "general_query"). Do NOT include any other text, explanations, or punctuation but do not ask user explicitly for category, instead use the context to infer what they want.   
 
-do not annoy them if they have already given you enough information.
+Never include the words ‘ACK’, ‘config_update’, ‘schedule_request’, or any intent category in your reply. These are for internal use only , you need to figure out input based on input provided , if unless input lacks clear timing 
+, clear topic with subtopics like examples , personality traits , you can ask for clarification and clarify as classificaton request , but do not echo anything which is unproffesion to user-interface
+your clarification request should always be likable and charming NOT STERILE AND BORING 
+ do not annoy them if they have already given you enough information.
 User Input: {user_input}
 
 Intent Category:"""

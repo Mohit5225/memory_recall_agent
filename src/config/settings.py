@@ -56,7 +56,13 @@ OPENROUTER_SECRET_KEY = os.getenv("OPENROUTER_SECRET_KEY")
 
 OPENROUTER_FALLBACK_MODELS = [
     "qwen/qwen3-235b-a22b:free",
-    # "moonshotai/kimi-dev-72b:free", # Add more models here later
-    # "qwen/qwen-2.5-coder-32b-instruct:free",
-    # "deepseek/deepseek-r1-0528:free",
+    "moonshotai/kimi-dev-72b:free",  
+     "qwen/qwen-2.5-coder-32b-instruct:free",
+    "deepseek/deepseek-r1-0528:free",
 ]
+
+
+
+model_sequence = ["qwen/qwen3-235b-a22b:free", "deepseek/deepseek-r1-0528:free", "qwen/qwen-2.5-coder-32b-instruct:free"]
+
+OPENROUTER_SELF_DESCRIPTION_MAX_RETRIES = int(os.getenv("OPENROUTER_SELF_DESCRIPTION_MAX_RETRIES", "3"))
