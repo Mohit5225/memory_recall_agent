@@ -70,6 +70,7 @@
 
 /* Navbar */
 .navbar {
+  
   background: var(--ds-black);
   border-bottom: 1px solid var(--meteor-gray);
   box-shadow: 0 2px 8px rgba(26, 26, 26, 0.1);

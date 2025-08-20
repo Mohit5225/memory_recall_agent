@@ -82,7 +82,12 @@ async def get_openrouter_chain_response_async(
             for attempt in range(1, retries + 1):
                 payload = {
                     "model": model,
-                    "messages": base_messages
+                    "messages": base_messages,
+                    # "extra_body": {
+                    #     "reasoning": False,
+                    #     "thinking": False
+                    # }
+
                 }
                 attempt_record: Dict[str, Any] = {
                     "model": model,

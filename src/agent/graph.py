@@ -77,8 +77,16 @@ def format_message_history(messages: List[Message], limit: Optional[int] = None)
     if not messages:
         return "No previous messages"
     
-    history = messages[-limit:] if limit else messages
-    return "\n".join(msg.to_text() for msg in history)
+    if limit and len(messages) > limit:
+        messages = messages[-limit:]
+    
+    # Format each message with role and content
+    formatted_messages = []
+    for msg in messages:
+        role_prefix = "User" if msg.role == "user" else "Assistant"
+        formatted_messages.append(f"{role_prefix}: {msg.content}")
+        
+    return "\n".join(formatted_messages)
 
 def create_message(user_id: str, content: str, role: Literal["user", "assistant"], context: Optional[dict] = None, processing_status: ProcessingStatus = ProcessingStatus.PENDING) -> Message:
     """Create a new Message object with standardized format and metadata."""
@@ -738,6 +746,7 @@ def build_agent_graph():
     workflow.add_node("tweak_config", call_tweak_agent)
     workflow.add_node("schedule", call_scheduling_logic)
     workflow.add_node("handle_clarification_request", handle_other_intent)  # Add this handler
+    workflow.add_node("self_description", handle_self_description)   # ← new
     workflow.add_node("general_query", handle_general_query)
     workflow.add_node("acknowledge", handle_acknowledge)
     workflow.add_node("other", handle_other_intent)
@@ -753,7 +762,7 @@ def build_agent_graph():
         logger.info(f"Routing intent: '{parsed_intent}'")
         
         # Defensive validation
-        valid_intents = {"config_update", "schedule_request", "general_query", "acknowledge", "other"}
+        valid_intents = {"config_update", "schedule_request", "self_description", "general_query", "acknowledge", "other"}
         if parsed_intent not in valid_intents:
             logger.warning(f"Unknown intent '{parsed_intent}', defaulting to 'other'")
             return "other"
@@ -768,6 +777,7 @@ def build_agent_graph():
              "clarification_request": "handle_clarification_request",
             "general_query": "general_query",
             "acknowledge": "acknowledge",
+            "self_description": "self_description",
             "other": "other"
         }
     )
@@ -776,6 +786,7 @@ def build_agent_graph():
     workflow.add_edge("general_query", "report_outcome")
     workflow.add_edge("acknowledge", "report_outcome")
     workflow.add_edge("handle_clarification_request", "report_outcome")
+    workflow.add_edge("self_description", "report_outcome")  # ← new
     workflow.add_edge("other", "report_outcome")
 
     # Connect tweak_config outcomes with defensive routing

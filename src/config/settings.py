@@ -55,10 +55,15 @@ OTP_REDIS_TOKEN = os.getenv("OTP_REDIS_TOKEN")  # e.g. "AdhyAAIjcDE0ZTk5YjVkMGJj
 OPENROUTER_SECRET_KEY = os.getenv("OPENROUTER_SECRET_KEY")
 
 OPENROUTER_FALLBACK_MODELS = [
-    "qwen/qwen3-235b-a22b:free",
-    "moonshotai/kimi-dev-72b:free",  
-     "qwen/qwen-2.5-coder-32b-instruct:free",
-    "deepseek/deepseek-r1-0528:free",
+    "openai/gpt-oss-20b:free",
+    "meta-llama/llama-3.1-70b-instruct:free",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free",
+    "google/gemini-flash-1.5-8b:free",
+
+    # "qwen/qwen3-235b-a22b:free",
+    # "moonshotai/kimi-dev-72b:free",  
+    #  "qwen/qwen-2.5-coder-32b-instruct:free",
+    # "deepseek/deepseek-r1-0528:free",
 ]
 
 
