@@ -87,8 +87,16 @@ async def parse_user_intent(
         # Basic cleaning of LLM output to get just the intent string
         intent = intent_raw.strip().lower()
 
-        # Validate the intent against expected categories (basic check)
-        valid_intents = ["config_update", "schedule_request", "general_query", "acknowledge", "clarification_request", "other"]
+
+        # Validate the intent against expected categories (now includes 'self_description')
+        valid_intents = [
+            "config_update",
+            "schedule_request",
+            "general_query",
+            "clarification_request",
+            "self_description",
+            "other"
+        ]
         if intent not in valid_intents:
             logger.warning(f"LLM returned unexpected intent: '{intent}'. Engaging clarification.")
             return await handle_unclear_intent(user_input, state)

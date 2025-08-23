@@ -15,10 +15,11 @@ from src.config.constants import DEFAULT_CONTEXT_WINDOW, GENERAL_QUERY_CONTEXT, 
 from src.config.settings import DB_NAME # Import DB_NAME
 from typing import List, Optional, Dict, Any, Literal
 import logging
-from datetime import datetime # Ensure datetime is imported
+from datetime import datetime, timezone  # Ensure datetime and timezone are imported
 import asyncio
 from bson import ObjectId  # Import ObjectId for MongoDB document IDs
 from hashlib import sha1  # Import sha1 for deterministic ID generation
+from pymongo.errors import ConnectionFailure, OperationFailure  # Import MongoDB error classes
 from src.llm.openrouter import get_openrouter_chain_response_async
 from src.config.settings import OPENROUTER_FALLBACK_MODELS, OPENROUTER_SELF_DESCRIPTION_MAX_RETRIES
 from src.core.self_description import SELF_DESCRIPTION_TEMPLATE, STATIC_SELF_DESCRIPTION_FALLBACK
@@ -36,6 +37,16 @@ def _generate_deterministic_id(msg: dict) -> ObjectId:
     return ObjectId(sha1(key.encode()).digest()[:12])
 
 async def save_messages_atomically(user_id: str, messages: List[Message]) -> bool:
+    """
+    Save multiple message objects atomically in a transaction.
+    
+    Args:
+        user_id: The user ID these messages belong to
+        messages: List of Message objects to save
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
     client: Optional[AsyncIOMotorClient] = await get_mongo_client()
     if not client:
         logger.error("get_mongo_client() returned None.")
@@ -55,7 +66,7 @@ async def save_messages_atomically(user_id: str, messages: List[Message]) -> boo
                         ProcessingStatus.COMPLETED,
                         ProcessingStatus.FAILED
                     ):
-                        md["last_attempt"] = datetime.utcnow()
+                        md["last_attempt"] = datetime.now(timezone.utc)
 
                     # 1) generate a consistent _id so we can upsert
                     if not md.get("_id"):
@@ -68,10 +79,18 @@ async def save_messages_atomically(user_id: str, messages: List[Message]) -> boo
                         upsert=True,
                         session=session
                     )
+        logger.debug(f"Successfully saved {len(messages)} messages for user {user_id}")
         return True
+    except ConnectionFailure as e:
+        logger.error(f"MongoDB connection failure during message save: {e}")
+        return False
+    except OperationFailure as e:
+        logger.error(f"MongoDB operation failure during message save: {e}")
+        return False
     except Exception as exc:
         logger.error(f"Transaction failed: {exc}", exc_info=True)
         return False
+         
 def format_message_history(messages: List[Message], limit: Optional[int] = None) -> str:
     """Format message history for LLM context with proper windowing."""
     if not messages:
@@ -89,14 +108,28 @@ def format_message_history(messages: List[Message], limit: Optional[int] = None)
     return "\n".join(formatted_messages)
 
 def create_message(user_id: str, content: str, role: Literal["user", "assistant"], context: Optional[dict] = None, processing_status: ProcessingStatus = ProcessingStatus.PENDING) -> Message:
-    """Create a new Message object with standardized format and metadata."""
+    """
+    Create a new Message object with standardized format and metadata.
+    
+    Args:
+        user_id: The user this message belongs to
+        content: The text content of the message
+        role: Either "user" or "assistant" to indicate who sent the message
+        context: Optional metadata about this message's processing context
+        processing_status: Current status of message processing
+        
+    Returns:
+        A properly formatted Message object ready for storage or use
+    """
     return Message(
         user_id=user_id,
         content=content,
         role=role,
-        timestamp=datetime.utcnow(),  # Ensure proper ordering
-        context=context or {},
-        processing_status=processing_status
+        timestamp=datetime.now(timezone.utc),  # Use UTC timezone consistently
+        context=context or {},  # Default to empty dict if None
+        processing_status=processing_status,
+        processing_attempts=0,  # Start with 0 attempts
+        last_attempt=datetime.now(timezone.utc) if processing_status != ProcessingStatus.PENDING else None
     )
 
 # --- LLM Prompt Templates ---

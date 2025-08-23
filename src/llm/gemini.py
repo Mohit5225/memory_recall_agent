@@ -135,16 +135,22 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
             gemini_failed = True 
             break
     if gemini_failed:
-        gemini_failed = True
+       
         logger.info("Gemini failed after all retries. Initiating OpenRouter fallback...")
         for model_name in OPENROUTER_FALLBACK_MODELS:
-            # We pass the original prompt, not any intermediate state.
+            # Use the intent rulebook as system_prompt and user_input as user_prompt for OpenRouter fallback
+            from src.core.intent_parser import INTENT_PARSING_PROMPT_TEMPLATE
+            user_input = message_context.get("user_input") if message_context and "user_input" in message_context else ""
+            if user_input is None:
+                user_input = ""
+            message_history = message_context.get("history") if message_context and "history" in message_context else None
+            system_prompt = INTENT_PARSING_PROMPT_TEMPLATE.format(user_input="", message_history=message_history or "")
             fallback_text, fallback_context  = await get_openrouter_chain_response_async(
-            prompt,  # system_prompt
-            prompt,  # user_prompt (or whatever the user actually said)
-            None,    # message_history (or a string if you have it)
-            model_sequence=[model_name]
-)
+                system_prompt,
+                user_input,
+                message_history,
+                model_sequence=[model_name]
+            )
             
             if fallback_text is not None:
                 logger.info(f"✅ Fallback to OpenRouter model '{model_name}' succeeded.")
