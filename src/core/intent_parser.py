@@ -19,7 +19,7 @@ EXAMPLES:
    * "Change your tone to professional"
    * "Write with more analogies"
    * "Make explanations shorter"
-- schedule_request: The user wants to set up, modify, or ask about reminder scheduling. Also use this when the user is responding to scheduling clarification questions.
+- schedule_request: The user wants to set up, modify, or ask about reminder scheduling. Also use this when the user is responding to scheduling clarification questions IF YOU DETECT REQUEST TO CHANGE OR SET TIMING , CLASSIFY AS schedule_request.
 EXAMPLES:
    * "Remind me about React hooks daily at 5:51"
    * "Can you set up a Python reminder every Tuesday?"
