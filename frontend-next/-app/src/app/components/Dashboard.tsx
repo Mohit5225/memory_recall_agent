@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Menu, X, Settings, PlusCircle, Search, BookOpen, Rocket, Send } from 'lucide-react';
 import ChatHistory from './ChatHistory';
@@ -22,6 +22,7 @@ const Dashboard: React.FC = () => {
   const [apiKey, setApiKey] = useState('');
   const [apiValidation, setApiValidation] = useState<'valid' | 'invalid' | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const userId = useSelector((state: RootState) => state.auth.user?.user_id);
   useEffect(() => {
   console.log("Dashboard useEffect triggered - userId:", userId);
@@ -75,6 +76,11 @@ const handleSendMessage = async () => {
   setChatHistory(prev => [...prev, newMessage]);
   setMessage('');
 
+  // Reset textarea height after sending
+  if (textareaRef.current) {
+    textareaRef.current.style.height = 'auto';
+  }
+
   try {
     const response = await fetch('http://localhost:8000/api/v1/chat', {
       method: 'POST',
@@ -101,6 +107,34 @@ const handleSendMessage = async () => {
     console.error('Failed to send message:', error);
   } finally {
     setIsLoading(false);
+  }
+};
+
+// Auto-resize textarea as user types
+const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const textarea = e.target;
+  // Split value into lines
+  const lines = textarea.value.split('\n');
+  // If more than 3 lines, trim to 3
+  if (lines.length > 3) {
+    textarea.value = lines.slice(0, 3).join('\n');
+  }
+  setMessage(textarea.value);
+
+  // Reset height and calculate new height
+  textarea.style.height = 'auto';
+  // Calculate height for up to 3 lines only
+  const lineHeight = 24; // Adjust if your CSS is different
+  const maxHeight = lineHeight * 3; // 3 lines
+  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+  textarea.style.overflowY = 'hidden'; // Always hidden
+};
+
+// Handle Enter key (send on Enter, new line on Shift+Enter)
+const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSendMessage();
   }
 };
   const handleNewChat = () => {
@@ -307,7 +341,8 @@ const handleSendMessage = async () => {
         )}
       >
         {/* Navbar */}
-        <nav className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-[#4B5563] shadow-lg">
+      <nav
+ className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-transparent">
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
             className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
@@ -333,14 +368,15 @@ const handleSendMessage = async () => {
         {/* Input Area */}
 
 <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 w-full max-w-2xl px-4">
-  <div className="relative">
-    <input 
-      type="text"
+  <div className="relative flex items-end">
+    <textarea
+      ref={textareaRef}
       value={message}
-      onChange={(e) => setMessage(e.target.value)}
+      onChange={handleTextareaChange}
+      onKeyDown={handleKeyDown}
       placeholder="Ask anything..."
-      className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base"
-      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+      className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-[56px] max-h-[120px]"
+      rows={1}
     />
     <button
       onClick={handleSendMessage}

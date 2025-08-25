@@ -13,6 +13,7 @@ const AgentPage: React.FC = () => {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); // <-- this scrolls to bottom
@@ -47,6 +48,39 @@ const AgentPage: React.FC = () => {
     const newMessage: ChatMessage = { sender: 'user', text: message };
     setChatHistory((prev) => [...prev, newMessage]);
     setMessage('');
+    // Reset textarea height after sending
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  // ...existing code...
+const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const textarea = e.target;
+  // Split value into lines
+  const lines = textarea.value.split('\n');
+  // If more than 3 lines, trim to 3
+  if (lines.length > 3) {
+    textarea.value = lines.slice(0, 3).join('\n');
+  }
+  setMessage(textarea.value);
+
+  // Reset height and calculate new height
+  textarea.style.height = 'auto';
+  // Calculate height for up to 3 lines only
+  const lineHeight = 24; // Adjust if your CSS is different
+  const maxHeight = lineHeight * 3; // 3 lines
+  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
+  textarea.style.overflowY = 'hidden'; // Always hidden
+};
+// ...existing code...
+
+  // Handle Enter key (send on Enter, new line on Shift+Enter)
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
   };
 
   return (
@@ -91,17 +125,19 @@ const AgentPage: React.FC = () => {
               </div>
             ))}
           </div>
-          <div className="w-full max-w-3xl flex items-center mt-4">
-            <input
-              type="text"
+          <div className="w-full max-w-3xl flex items-end mt-4">
+            <textarea
+              ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
               placeholder="Ask about React, state management, etc."
-              className="flex-1 p-2 border rounded-l-lg dark:bg-gray-800 dark:text-white"
+              className="flex-1 p-2 border rounded-l-lg dark:bg-gray-800 dark:text-white resize-none overflow-y-hidden min-h-[40px] max-h-[90px]"
+              rows={1}
             />
             <button
               onClick={handleSendMessage}
-              className="p-2 bg-blue-500 text-white rounded-r-lg"
+              className="p-2 bg-blue-500 text-white rounded-r-lg h-[40px] flex items-center justify-center"
             >
               Send
             </button>

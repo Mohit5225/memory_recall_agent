@@ -37,7 +37,7 @@ export default function ChatBubble({ sender, text }: ChatBubbleProps) {
             'prose prose-sm max-w-none break-words text-[#F1F5F9]',
             isUser && 'text-right'
           )}>
-            <p>{text}</p>
+           <ReactMarkdown>{text}</ReactMarkdown>
           </div>
         </div>
       </div>
