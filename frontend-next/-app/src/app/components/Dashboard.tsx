@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { Menu, X, Settings, PlusCircle, Search, BookOpen, Rocket, Send } from 'lucide-react';
 import ChatHistory from './ChatHistory';
 import { RootState } from '../store';
 import { useSelector } from 'react-redux';
-
+import ChatFooter from "@/app/components/ChatFooter"
 interface ChatMessage {
 
   sender: 'user' | 'assistant';
@@ -24,6 +24,35 @@ const Dashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const userId = useSelector((state: RootState) => state.auth.user?.user_id);
+  const chatRef = useRef<HTMLDivElement | null>(null);
+  const [inputH, setInputH] = useState(0);
+  
+  // Ensure chat scrolls when messages change or footer size / window resizes
+  useEffect(() => {
+    const scrollToBottom = () => {
+      const el = chatRef.current
+      if (el) {
+        el.scrollTop = el.scrollHeight
+      }
+    }
+
+    // initial scroll after render
+    scrollToBottom()
+
+    // debounce resize handler lightly
+    let t: number | undefined
+    const onResize = () => {
+      window.clearTimeout(t)
+      t = window.setTimeout(scrollToBottom, 100)
+    }
+    window.addEventListener('resize', onResize)
+
+    return () => {
+      window.removeEventListener('resize', onResize)
+      if (t) window.clearTimeout(t)
+    }
+  }, [chatHistory, isLoading]); // re-run when messages/loading change
+
   useEffect(() => {
   console.log("Dashboard useEffect triggered - userId:", userId);
   
@@ -333,61 +362,66 @@ const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         </button>
       </aside>
 
-      {/* Main Chat Area */}
-      <div
-        className={cn(
-          'flex-1 flex flex-col transition-all duration-300',
-          leftSidebarOpen && 'ml-[35vw]'
-        )}
-      >
-        {/* Navbar */}
-      <nav
- className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-transparent">
-          <button
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
-          >
-            <AppLogo />
-            <span className="text-xl font-bold text-[#F1F5F9]">Memory Recaller</span>
-          </button>
-          <button
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-            // Settings: Nebula Purple icon, hover Nebula Purple at 20% bg
-            className="text-[#7C3AED] hover:bg-[#7C3AED]/20 rounded-full p-2 transition-colors duration-200"
-          >
-            <Settings size={24} />
-          </button>
-        </nav>
+     
 
-        {/* Chat Content */}
-        <ChatHistory
-          messages={chatHistory}
-          isLoading={isLoading}
-          className="flex-1 bg-[#020617] rounded-lg overflow-y-auto pb-24"></ChatHistory>
-
-        {/* Input Area */}
-
-<div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 w-full max-w-2xl px-4">
-  <div className="relative flex items-end">
-    <textarea
-      ref={textareaRef}
-      value={message}
-      onChange={handleTextareaChange}
-      onKeyDown={handleKeyDown}
-      placeholder="Ask anything..."
-      className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-[56px] max-h-[120px]"
-      rows={1}
-    />
+{/* Main Chat Area */}
+<div
+  className={cn(
+    // We make this a flex column that takes up the full screen height
+    'flex flex-col h-screen flex-1 transition-all duration-300',
+    leftSidebarOpen && 'ml-[35vw]'
+  )}
+>
+  {/* Navbar (stays the same) */}
+  <nav className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-gray-800">
     <button
-      onClick={handleSendMessage}
-      disabled={!message.trim()}
-      className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-all duration-200 shadow-sm"
+      onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+      className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
     >
-      <Send size={18} className="text-[#F1F5F9]" />
+      <AppLogo />
+      <span className="text-xl font-bold text-[#F1F5F9]">Memory Recaller</span>
     </button>
+    <button
+      onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+      className="text-[#7C3AED] hover:bg-[#7C3AED]/20 rounded-full p-2 transition-colors duration-200"
+    >
+      <Settings size={24} />
+    </button>
+  </nav>
+
+  {/* Chat Content */}
+  <ChatHistory
+        ref={chatRef}
+        messages={chatHistory}
+        isLoading={isLoading}
+        className="flex-1 overflow-y-auto p-4 pb-10"
+      >
+        {/* Invisible spacer - let ChatFooter compute responsive height itself */}
+      
+      </ChatHistory>
+    {/* Input Area - Now a proper footer within the flex layout */}
+  <div className="p-4 bg-[#020617]">
+    <div className="relative flex items-end max-w-3xl mx-auto">
+      <textarea
+        ref={textareaRef}
+        value={message}
+        onChange={handleTextareaChange}
+        onKeyDown={handleKeyDown}
+        placeholder="Ask anything..."
+        className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-14 max-h-30"
+        rows={1}
+      />
+      <button
+        onClick={handleSendMessage}
+        disabled={!message.trim()}
+        // Adjusted position for the new layout
+        className="absolute right-3 bottom-3 p-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-all duration-200 shadow-sm"
+      >
+        <Send size={18} className="text-[#F1F5F9]" />
+      </button>
+    </div>
   </div>
 </div>
-      </div>
 
       {/* Right Sidebar */}
       <aside

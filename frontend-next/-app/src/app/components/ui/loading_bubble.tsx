@@ -1,7 +1,7 @@
 import { Icons } from '@/components//ui/icons'
 export default function LoadingBubble() {
   return (
-    <div className="flex items-start gap-4 rounded-lg bg-[#4B5563]/50 p-4 mr-auto max-w-[70%]">
+  <div className="mx-auto w-full max-w-[var(--chat-max-width,700px)] flex items-start gap-4 rounded-lg bg-[#4B5563]/50 p-4">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5F6483] text-[#F1F5F9]">
         <Icons.Bot className="h-5 w-5" />
       </div>

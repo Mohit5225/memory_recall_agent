@@ -77,6 +77,8 @@
   color: var(--lunar-white);
    padding: 0.5rem 1rem; 
     height: auto; 
+    border-bottom: none;  /* Removed border to eliminate visible separation */
+  box-shadow: none;    
 
   
 }
@@ -95,6 +97,7 @@
   background: var(--ds-black);
   border: 1px solid var(--meteor-gray);
   color: var(--lunar-white);
+  border-top: none !important;
 }
 .inputField::placeholder {
   color: rgba(241, 245, 249, 0.5);

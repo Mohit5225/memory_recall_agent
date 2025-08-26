@@ -54,26 +54,20 @@ const AgentPage: React.FC = () => {
     }
   };
 
-  // ...existing code...
-const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-  const textarea = e.target;
-  // Split value into lines
-  const lines = textarea.value.split('\n');
-  // If more than 3 lines, trim to 3
-  if (lines.length > 3) {
-    textarea.value = lines.slice(0, 3).join('\n');
-  }
-  setMessage(textarea.value);
-
-  // Reset height and calculate new height
-  textarea.style.height = 'auto';
-  // Calculate height for up to 3 lines only
-  const lineHeight = 24; // Adjust if your CSS is different
-  const maxHeight = lineHeight * 3; // 3 lines
-  textarea.style.height = Math.min(textarea.scrollHeight, maxHeight) + 'px';
-  textarea.style.overflowY = 'hidden'; // Always hidden
-};
-// ...existing code...
+  // Auto-resize textarea as user types
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const textarea = e.target;
+    setMessage(textarea.value);
+    
+    // Reset height and calculate new height
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const maxHeight = 90; // About 3 rows max (40px per row)
+    
+    // Set height up to maxHeight, then enable scrolling
+    textarea.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+    textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+  };
 
   // Handle Enter key (send on Enter, new line on Shift+Enter)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
