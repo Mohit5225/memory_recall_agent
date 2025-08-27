@@ -13,8 +13,8 @@ export default function ChatBubble({ sender, text }: ChatBubbleProps) {
     <div className={cn('py-2', isUser ? 'flex justify-end' : 'flex justify-start')}>
       <div
         className={cn(
-          'max-w-2xl', // Retain fixed max-width for readability
-          isUser ? 'ml-auto' : 'mr-auto' // Alignment without avatar
+          'max-w-[43.5rem]', // Retain fixed max-width for readability
+          isUser ? 'ml-auto pl-10' : 'mr-auto' // Alignment without avatar
         )}
       >
         {/* Message content (now the only element) */}

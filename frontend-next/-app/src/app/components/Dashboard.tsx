@@ -372,23 +372,33 @@ const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     leftSidebarOpen && 'ml-[35vw]'
   )}
 >
-  {/* Navbar (stays the same) */}
-  <nav className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-gray-800">
-    <button
-      onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-      className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
+<nav className="sticky top-0 z-20 bg-[#020617] p-3 flex justify-between items-center border-b border-gray-800">
+  <button
+    onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+    className="flex items-center space-x-2 hover:opacity-80 transition-opacity duration-200"
+  >
+    {/* Animated logo/title: fade+slide out when sidebar opens */}
+    <span
+      className={`
+        flex items-center space-x-2
+        transition-all duration-300
+        ${leftSidebarOpen
+          ? 'opacity-0 -translate-x-4 pointer-events-none select-none'
+          : 'opacity-100 translate-x-0'}
+      `}
+      style={{ willChange: 'opacity, transform' }}
     >
       <AppLogo />
       <span className="text-xl font-bold text-[#F1F5F9]">Memory Recaller</span>
-    </button>
-    <button
-      onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-      className="text-[#7C3AED] hover:bg-[#7C3AED]/20 rounded-full p-2 transition-colors duration-200"
-    >
-      <Settings size={24} />
-    </button>
-  </nav>
-
+    </span>
+  </button>
+  <button
+    onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+    className="text-[#7C3AED] hover:bg-[#7C3AED]/20 rounded-full p-2 transition-colors duration-200"
+  >
+    <Settings size={24} />
+  </button>
+</nav>
   {/* Chat Content */}
   <ChatHistory
         ref={chatRef}
