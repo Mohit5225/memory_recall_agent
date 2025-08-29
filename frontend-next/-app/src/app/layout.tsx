@@ -1,16 +1,27 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Lato, Space_Mono , Jura } from "next/font/google";
 import "./globals.css";
 import { Provider } from "react-redux"
 import { store } from "./store";
 import Providers from './providers'
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+
+
+const lato = Lato({
+  weight: ["400","100","300","700","900"],
+    // fix: provide weights as array
+  variable: "--font-lato", // fix: matches Dashboard usage
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jura = Jura({
+  weight: ["400", "300" , "500", "600", "700"],
+    // fix: provide weights as array
+  variable: "--font-jura", // fix: matches Dashboard usage
+  subsets: ["latin"],
+});
+const spaceMono = Space_Mono({
+  weight: ["400", "700"], // fix: provide weights as array
+  variable: "--font-space-mono",
   subsets: ["latin"],
 });
 
@@ -24,7 +35,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${lato.variable} ${spaceMono.variable} ${jura.variable} antialiased`}>
         <Providers>
            
             {children}

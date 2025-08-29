@@ -15,10 +15,14 @@ module.exports = {
         '2.5': '2.5rem',
         '2.6': '2.6rem',
       },
+      fontFamily: {
+        lato: ['var(--font-lato)'],
+        jura: ['var(--font-jura)'],
+        'space-mono': ['var(--font-space-mono)'],
+      },
     },
   },
   plugins: [
-    // ...existing code...
     require('tailwind-scrollbar'),
   ],
 }

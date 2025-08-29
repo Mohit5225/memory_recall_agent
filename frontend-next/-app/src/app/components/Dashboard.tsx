@@ -420,7 +420,7 @@
             onKeyDown={handleKeyDown}
 
             placeholder="Ask anything..."
-            className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F59] placeholder-[#F1F59]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-14 max-h-30"
+            className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[white] placeholder-[#F1F59]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-14 max-h-30"
             rows={1}
         />
         <button
