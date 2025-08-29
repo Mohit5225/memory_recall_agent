@@ -42,18 +42,11 @@ const ChatHistory = forwardRef<HTMLDivElement, ChatHistoryProps>(
         ref={setCombinedRef}
         className={cn(
           // ...existing code...
-          'relative flex flex-col space-y-6.5 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-[#7C3AED] scrollbar-track-[#2A1A4A]',
+          'relative flex flex-col space-y-6.5 overflow-y-auto  scrollbar-thin scrollbar-thumb-[#7C3AED] scrollbar-track-[#2A1A4A]',
           className
         )}
       >
-        {/* Radial Glow Background */}
-        <div
-          className="absolute inset-0 z-0 pointer-events-none"
-          style={{
-            backgroundImage:
-              'radial-gradient(circle 500px at 50% 200px, #3e3e3e, transparent)',
-          }}
-        />
+      
         {/* Message Content */}
         <div className="relative z-10 flex flex-col space-y-6.5 max-w-4xl mx-auto">
           {messages.length === 0 && !isLoading && (

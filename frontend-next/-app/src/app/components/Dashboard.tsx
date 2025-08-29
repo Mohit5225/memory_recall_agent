@@ -410,27 +410,29 @@
         
         </ChatHistory>
       {/* Input Area - Now a proper footer within the flex layout */}
-    <div className="p-4 bg-[#020617]">
-      <div className="relative flex items-end max-w-3xl mx-auto">
+<footer className="bg-[#020617]">
+    <div className="relative flex items-end max-w-[45rem] 
+     mb-8 mx-auto">
         <textarea
-          ref={textareaRef}
-          value={message}
-          onChange={handleTextareaChange}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask anything..."
-          className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F5F9] placeholder-[#F1F5F9]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-14 max-h-30"
-          rows={1}
+            ref={textareaRef}
+            value={message}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+
+            placeholder="Ask anything..."
+            className="w-full px-4 py-4 pr-14 bg-[#181C2A] border border-[#2D3748] rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7C3AED] focus:border-transparent text-[#F1F59] placeholder-[#F1F59]/50 shadow-lg text-base resize-none overflow-y-hidden min-h-14 max-h-30"
+            rows={1}
         />
         <button
-          onClick={handleSendMessage}
-          disabled={!message.trim()}
-          // Adjusted position for the new layout
-          className="absolute right-3 bottom-3 p-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-all duration-200 shadow-sm"
+            onClick={handleSendMessage}
+            disabled={!message.trim()}
+            // Adjusted position for the new layout
+            className="absolute right-3 bottom-3 p-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-all duration-200 shadow-sm"
         >
-          <Send size={18} className="text-[#F1F5F9]" />
+            <Send size={18} className="text-[#F1F59]" />
         </button>
-      </div>
     </div>
+</footer>
   </div>
 
         {/* Right Sidebar */}
