@@ -17,5 +17,8 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // ...existing code...
+    require('tailwind-scrollbar'),
+  ],
 }

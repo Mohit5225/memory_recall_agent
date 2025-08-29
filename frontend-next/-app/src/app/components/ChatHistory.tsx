@@ -1,5 +1,5 @@
-'use client'
-import React, { useEffect, forwardRef, useRef, useLayoutEffect } from 'react'
+"use client"
+import React, { forwardRef, useRef, useLayoutEffect } from 'react'
 import ChatBubble from './ChatBubble'
 import LoadingBubble from './ui/loading_bubble'
 import { cn } from '@/lib/utils'
@@ -16,21 +16,33 @@ const ChatHistory = forwardRef<HTMLDivElement, ChatHistoryProps>(
   ({ messages, isLoading, className, children }, ref) => {
     // Fallback local ref in case no ref is provided
     const localRef = useRef<HTMLDivElement>(null)
-    const combinedRef = (ref as React.MutableRefObject<HTMLDivElement | null>) || localRef
 
-    useEffect(() => {
-      // Use the combined ref (external if provided, else local)
-      const scrollArea = (ref as React.RefObject<HTMLDivElement>)?.current || localRef.current
-      if (scrollArea) {
-        scrollArea.scrollTop = scrollArea.scrollHeight
+    // Combine forwarded ref (function or object) with our localRef
+    const setCombinedRef = (node: HTMLDivElement | null) => {
+      // Always keep localRef updated so internal logic can rely on it
+      localRef.current = node
+      if (!ref) return
+      if (typeof ref === 'function') {
+        ref(node)
+      } else {
+        ;(ref as React.MutableRefObject<HTMLDivElement | null>).current = node
       }
-    }, [messages, isLoading, ref])
+    }
+
+    // Scroll to bottom after messages/loading state updates, before paint to avoid flicker
+    useLayoutEffect(() => {
+      const el = localRef.current
+      if (el) {
+        el.scrollTop = el.scrollHeight
+      }
+    }, [messages, isLoading])
 
     return (
       <div
-        ref={ref || localRef}
+        ref={setCombinedRef}
         className={cn(
-          'relative flex flex-col space-y-6.5 overflow-y-auto p-4',
+          // ...existing code...
+          'relative flex flex-col space-y-6.5 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-[#7C3AED] scrollbar-track-[#2A1A4A]',
           className
         )}
       >
@@ -53,9 +65,6 @@ const ChatHistory = forwardRef<HTMLDivElement, ChatHistoryProps>(
             <ChatBubble key={index} sender={message.sender} text={message.text} />
           ))}
           {isLoading && <LoadingBubble />}
-          
-          {/* Render the children (which will include ChatFooter) */}
-          {children}
         </div>
       </div>
     )
