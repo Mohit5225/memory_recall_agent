@@ -128,15 +128,81 @@
       }
 
       const data = await response.json();
+      
+      // Add empty assistant message first
       setChatHistory(prev => [...prev, {
-        sender : 'assistant',
-        text: data.response
+        sender: 'assistant',
+        text: ''
       }]);
+      
+      // If streaming tokens is enabled, show token by token with slight delays
+      if (data.stream_tokens) {
+        // Approximate token chunking (simplified)
+        // This treats each word and punctuation as separate tokens, which is a simplification
+        // In a real tokenizer, tokens are more complex, but this gives a similar visual effect
+        const tokens = tokenizeText(data.response);
+        let currentText = '';
+        
+        // Simulate streaming by revealing one token at a time
+        for (let i = 0; i < tokens.length; i++) {
+          const token = tokens[i];
+          currentText += token;
+          
+          setChatHistory(prev => {
+            const newHistory = [...prev];
+            // Replace the last message (which is the assistant message we're updating)
+            newHistory[newHistory.length - 1] = {
+              sender: 'assistant',
+              text: currentText
+            };
+            return newHistory;
+          });
+          
+          // Random delay between 15-45ms for natural feel
+          await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 30) + 15));
+        }
+      } else {
+        // Standard non-streamed response (fallback)
+        setChatHistory(prev => {
+          const newHistory = [...prev];
+          // Replace the last message with the full response
+          newHistory[newHistory.length - 1] = {
+            sender: 'assistant',
+            text: data.response
+          };
+          return newHistory;
+        });
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
     } finally {
       setIsLoading(false);
     }
+  };
+  
+  // Simple tokenizer function that splits text into word-like chunks
+  // This is a simplified approximation of ML tokenization
+  const tokenizeText = (text: string): string[] => {
+    // Split by spaces but preserve spaces and punctuation
+    // This regex captures words, spaces, and punctuation as separate tokens
+    const tokens: string[] = [];
+    
+    // First pass: Split by spaces while preserving spaces
+    const spaceTokens = text.split(/(\s+)/);
+    
+    // Second pass: Split each non-space token by punctuation while preserving the punctuation
+    for (const token of spaceTokens) {
+      if (token.trim() === '') {
+        // Preserve whitespace tokens as is
+        tokens.push(token);
+      } else {
+        // Split by punctuation and preserve it
+        const subTokens = token.split(/([.,!?;:"'(){}\[\]<>])/);
+        tokens.push(...subTokens.filter(t => t !== ''));
+      }
+    }
+    
+    return tokens;
   };
 
   // Auto-resize textarea as user types

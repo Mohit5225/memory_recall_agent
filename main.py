@@ -148,6 +148,7 @@ class ChatResponse(BaseModel):
     success: bool
     response: str
     intent: str = "unknown"
+    stream_tokens: bool = False
 
 # --- Error Handlers ---
 @app.exception_handler(DatabaseError)
@@ -193,6 +194,9 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
     """
     Main chat endpoint that processes user messages through the agent graph.
     Messages are saved immediately and pruned as needed for proper context handling.
+    
+    Returns the full response at once, but with metadata indicating it should be rendered
+    token by token on the frontend.
     """
     logger.info(f"Chat endpoint called with user_id: {request.user_id}")
     try:        # Load recent message history with fixed window
@@ -272,10 +276,12 @@ async def chat_endpoint(request: ChatRequest) -> Dict[str, Any]:
             "database error", "internal database issue"
         ])
         
+        # Add emulated streaming flag to inform frontend to render token by token
         response = {
             "success": not is_error,
             "response": response_content,
-            "intent": final_state.get("parsed_intent", "unknown")
+            "intent": final_state.get("parsed_intent", "unknown"),
+            "stream_tokens": True  # Flag indicating frontend should emulate token-by-token streaming
         }
         logger.info(f"Sending response: {response}")
         return response
