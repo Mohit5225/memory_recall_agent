@@ -148,7 +148,6 @@ class ChatResponse(BaseModel):
     success: bool
     response: str
     intent: str = "unknown"
-    stream_tokens: bool = False
 
 # --- Error Handlers ---
 @app.exception_handler(DatabaseError)

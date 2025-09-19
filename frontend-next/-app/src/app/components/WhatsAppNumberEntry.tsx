@@ -18,7 +18,12 @@ import "react-phone-input-2/lib/style.css"
 const WhatsAppNumberEntry: React.FC = () => {
   const router = useRouter()
   const dispatch = useDispatch()
-  const [phone, setPhone] = useState("")
+  // visible input string shown in the control
+  const [phoneDisplay, setPhoneDisplay] = useState("")
+  // explicit dial code (no +), authoritative from PhoneInput's country object
+  const [dialCode, setDialCode] = useState("91")
+  // national number digits only, trunk zeros removed
+  const [nationalNumber, setNationalNumber] = useState("")
   const [isValid, setIsValid] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -27,48 +32,80 @@ const WhatsAppNumberEntry: React.FC = () => {
   const [otp, setOtp] = useState("")
   const [otpLoading, setOtpLoading] = useState(false)
   const [otpSuccess, setOtpSuccess] = useState(false)
-  const [countryData, setCountryData] = useState({ dialCode: "91" }) // Default to India's code
 
-  // Fixed validation: Properly separate country code from the phone number
-  const validatePhone = (value: string, country: any) => {
-    // Extract just the number without country code
-    const countryCode = country?.dialCode || countryData.dialCode;
-    const numberWithoutCode = value.replace(/[^0-9]/g, "").substring(countryCode.length);
-    
-    // For most countries, mobile numbers should be at least 10 digits
-    return numberWithoutCode.length >= 10;
+  // ---------- Helpers (minimal, exact-10 requirement) ----------
+
+  // keep digits only
+  const onlyDigits = (s?: string) => (s || "").replace(/\D/g, "")
+
+  // extract national part from a cleaned digits string using the authoritative dialCode
+  const extractNational = (cleanedInput: string, dCode: string) => {
+    if (!cleanedInput) return ""
+
+    // If input begins with dial code (e.g. "919876543210"), strip it
+    if (dCode && cleanedInput.startsWith(dCode)) {
+      // remove dial code then strip any leading zeros left from trunk formatting
+      return cleanedInput.slice(dCode.length).replace(/^0+/, "")
+    }
+
+    // If user typed a trunk zero (e.g. "09876543210"), strip leading zeros
+    if (cleanedInput.startsWith("0")) {
+      return cleanedInput.replace(/^0+/, "")
+    }
+
+    // Otherwise treat as national number as-is
+    return cleanedInput
   }
 
-  // Handle phone number change with improved validation
+  // exact 10-digit national requirement + must have dialect (country)
+  const validateNational = (nat: string, dCode: string) => {
+    if (!dCode) return false
+    return nat.length === 10
+  }
+
+  // build canonical E.164 number to send to backend
+  const buildE164 = (dCode: string, nat: string) => {
+    const national = nat.replace(/^0+/, "")
+    return `+${dCode}${national}`
+  }
+
+  // ---------- Handlers ----------
+
+  // Note: react-phone-input-2 onChange signature: (value, country, e, formattedValue)
   const handleChange = (value: string, country: any) => {
-    setPhone(value)
-    setCountryData({ dialCode: country.dialCode })
-    setIsValid(validatePhone(value, country))
+    const cleaned = onlyDigits(value)
+    const newDial = country?.dialCode ?? dialCode
+    const extractedNational = extractNational(cleaned, newDial)
+
+    setPhoneDisplay(value)
+    setDialCode(newDial)
+    setNationalNumber(extractedNational)
+    setIsValid(validateNational(extractedNational, newDial))
     setError("")
   }
 
-  // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError("")
 
+    const e164 = buildE164(dialCode, nationalNumber)
+
     try {
       await axios.post(
         "http://localhost:8000/auth/whatsapp",
-        { whatsapp_number: "+" + phone.replace(/[^0-9]/g, "") },
+        { whatsapp_number: e164 },
         { withCredentials: true }
       )
       setOtpSent(true)
       setResendCooldown(60)
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to send OTP")
+      setError(err?.response?.data?.detail || "Failed to send OTP")
     } finally {
       setLoading(false)
     }
   }
 
-  // OTP verification handler
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     setOtpLoading(true)
@@ -82,13 +119,12 @@ const WhatsAppNumberEntry: React.FC = () => {
       )
       setOtpSuccess(true)
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to verify OTP")
+      setError(err?.response?.data?.detail || "Failed to verify OTP")
     } finally {
       setOtpLoading(false)
     }
   }
 
-  // Resend OTP handler
   const handleResend = async () => {
     setLoading(true)
     setError("")
@@ -97,19 +133,18 @@ const WhatsAppNumberEntry: React.FC = () => {
       await axios.post("http://localhost:8000/auth/send-otp", {}, { withCredentials: true })
       setResendCooldown(60)
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to resend OTP.")
+      setError(err?.response?.data?.detail || "Failed to resend OTP.")
     } finally {
       setLoading(false)
     }
   }
 
-  // Handle OTP input change
   const handleOtpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, "")
     setOtp(value)
   }
 
-  // Cooldown timer effect
+  // cooldown timer
   useEffect(() => {
     if (resendCooldown > 0) {
       const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000)
@@ -117,7 +152,7 @@ const WhatsAppNumberEntry: React.FC = () => {
     }
   }, [resendCooldown])
 
-  // Redirect after successful OTP verification
+  // redirect after OTP success
   useEffect(() => {
     if (otpSuccess) {
       dispatch(fetchCurrentUser() as any)
@@ -126,9 +161,10 @@ const WhatsAppNumberEntry: React.FC = () => {
     }
   }, [otpSuccess, router, dispatch])
 
+  // ---------- Render ----------
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#0f1724] via-[#121212] to-[#1a1033]">
-      {/* Custom scrollbar styles - Add to root element */}
       <style jsx global>{`
         .react-tel-input .country-list::-webkit-scrollbar {
           width: 6px;
@@ -152,9 +188,7 @@ const WhatsAppNumberEntry: React.FC = () => {
 
       <Card className="w-full max-w-md bg-[#1f1b2b]/70 backdrop-blur-md shadow-2xl rounded-2xl ring-1 ring-white/5 border-none">
         <CardHeader className="relative pb-3">
-          {/* soft top accent that blends with background */}
           <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 w-36 h-24 rounded-full opacity-20 blur-3xl bg-gradient-to-r from-[#7C3AED] to-[#9575CD]"></div>
-
           <div className="flex items-center justify-center mb-2 mt-3">
             <div className="w-12 h-12 rounded-full bg-gradient-to-r from-[#7C3AED]/80 to-[#9575CD]/80 flex items-center justify-center shadow-md">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
@@ -162,7 +196,6 @@ const WhatsAppNumberEntry: React.FC = () => {
               </svg>
             </div>
           </div>
-
           <CardTitle className="text-center text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#E0C3FC] to-[#8EC5FC] font-jura">WhatsApp Verification</CardTitle>
           <p className="text-center text-[#D1C7F6] text-sm font-jura">
             {!otpSent ? "Link your WhatsApp for memory reinforcement" : !otpSuccess ? "Enter the verification code" : "Verification successful!"}
@@ -176,25 +209,25 @@ const WhatsAppNumberEntry: React.FC = () => {
                 <label className="text-[#E5E7EB] font-jura text-sm font-medium">Enter your WhatsApp number</label>
                 <div className="phone-input-wrapper">
                   <PhoneInput
-                    country={'in'}
-                    value={phone}
-                    onChange={handleChange}
+                    country={"in"}
+                    value={phoneDisplay}
+                    onChange={handleChange as any}
                     enableSearch
                     inputProps={{
-                      name: 'whatsapp',
+                      name: "whatsapp",
                       required: true,
                       autoFocus: true,
                     }}
-                  containerClass="!w-full !mb-4"
-  inputClass="!w-full !bg-transparent !text-gray-200 !text-base !py-3 !px-12 !rounded-lg !border !border-gray-600/35"
-  buttonClass="!absolute !left-0 !h-full !bg-transparent !border-r-0 !border-gray-600/35 !rounded-l-lg !z-10"
-  dropdownClass="!bg-[#1d1b23] !text-gray-200 !border-gray-700"
-  searchClass="!bg-[#2A2139] !text-gray-200 !border-gray-700 !my-2 !mx-auto"
-  searchPlaceholder="Search country..."
-  countryCodeEditable={false}
+                    containerClass="!w-full !mb-4"
+                    inputClass="!w-full !bg-transparent !text-gray-200 !text-base !py-3 !px-12 !rounded-lg !border !border-gray-600/35"
+                    buttonClass="!absolute !left-0 !h-full !bg-transparent !border-r-0 !border-gray-600/35 !rounded-l-lg !z-10"
+                    dropdownClass="!bg-[#1d1b23] !text-gray-200 !border-gray-700"
+                    searchClass="!bg-[#2A2139] !text-gray-200 !border-gray-700 !my-2 !mx-auto"
+                    searchPlaceholder="Search country..."
+                    countryCodeEditable={false}
                   />
                   <div className="text-xs text-[#A8A4C4] mt-1 px-2">
-                    Please enter at least 10 digits after country code
+                    Detected country: +{dialCode} • National: {nationalNumber || "–"} • must be 10 digits
                   </div>
                 </div>
               </div>
@@ -243,7 +276,7 @@ const WhatsAppNumberEntry: React.FC = () => {
                 </div>
 
                 <div className="text-center text-sm text-[#C9BFF6] font-jura">
-                  Didn't receive the code?{' '}
+                  Didn't receive the code?{" "}
                   <button
                     type="button"
                     onClick={handleResend}
@@ -286,7 +319,6 @@ const WhatsAppNumberEntry: React.FC = () => {
             </div>
           )}
 
-          {/* Information section */}
           {!otpSuccess && (
             <div className="mt-6 pt-6 border-t border-[#2b2b3a] text-sm text-[#C9BFF6] font-jura">
               <h4 className="font-medium text-[#E5E7EB] mb-2">Why we need your WhatsApp</h4>

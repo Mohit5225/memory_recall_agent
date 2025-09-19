@@ -49,8 +49,9 @@ OAUTH_ALLOWED_DOMAINS = [domain.strip() for domain in os.getenv("OAUTH_ALLOWED_D
 OAUTH_MAX_LOGIN_ATTEMPTS = int(os.getenv("OAUTH_MAX_LOGIN_ATTEMPTS", "5"))
 OAUTH_RATE_LIMIT_WINDOW = int(os.getenv("OAUTH_RATE_LIMIT_WINDOW", "300"))  # 5 minutes
 
-OTP_REDIS_URL = os.getenv("OTP_REDIS_URL")  # e.g. "https://integral-mantis-55410.upstash.io"
-OTP_REDIS_TOKEN = os.getenv("OTP_REDIS_TOKEN")  # e.g. "AdhyAAIjcDE0ZTk5YjVkMGJjYzE0ZDU2OGJkMTcyMDQyMjY3NWVmM3AxMA"
+OTP_REDIS_URL = os.getenv("OTP_REDIS_URL")
+
+OTP_REDIS_TOKEN = os.getenv("OTP_REDIS_TOKEN")  
  
 OPENROUTER_SECRET_KEY = os.getenv("OPENROUTER_SECRET_KEY")
 

@@ -156,9 +156,9 @@ async def get_gemini_response_async(prompt: str, message_context: Optional[dict]
                 logger.info(f"✅ Fallback to OpenRouter model '{model_name}' succeeded.")
                 # Return the successful fallback response directly
                 return fallback_text, fallback_context
-            else: 
+            else:
                 logger.warning(f"❌ Fallback to OpenRouter model '{model_name}' failed. Trying next model if available.")
-                # Update the main context with the latest failure details for the final repo
+                # Update the main context with the latest failure details for the final report
                 context.update(fallback_context)
 
     # If we reach here, it means Gemini and ALL fallback models have failed.
