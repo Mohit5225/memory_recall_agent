@@ -267,7 +267,7 @@ const WhatsAppNumberEntry: React.FC = () => {
                     value={otp}
                     onChange={handleOtpChange}
                     maxLength={6}
-                    pattern="\\d{6}"
+                    pattern="[0-9]{6}" 
                     className="relative bg-transparent border border-[#4B5563] rounded-lg px-4 py-3 text-center text-xl tracking-widest w-full text-[#E5E7EB] font-mono"
                     placeholder="••••••"
                     autoFocus

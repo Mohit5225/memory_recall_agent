@@ -18,7 +18,7 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "user_settings") # Default Collec
 
 # --- LLM Settings ---
 # You could add model names, temperatures etc. here later
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-1.5-flash") # Default LLM model
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.5-flash-lite") # Default LLM model
 
 
 
