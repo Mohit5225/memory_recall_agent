@@ -1,5 +1,29 @@
-# Memory Recall Agent
-An AI-powered chat agent with **persistent memory** built on FastAPI, LangGraph, and Google Gemini. Users authenticate via Google OAuth, chat with an agent that remembers past conversations, and can set up scheduled WhatsApp reminders.
+# Memory Recaller Agent
+
+## Purpose
+Help you keep hard-earned concepts from drifting away by sending short, regular, personalized recall reminders. It enables passive daily exposure so you retain important knowledge without long study sessions.
+
+## Introduction
+The Memory Recaller Agent converts a single 5-minute chat into an ongoing recall system. Tell it what to remember, when to send it, and how to phrase it. After setup it sends daily bite-sized reminders in the tone and format you chose. No forms. No menus. No manual scheduling.
+
+## Key Features
+- **5-minute chat setup** - Configure topics, cadence, tone, and delivery via conversation.  
+- **Daily passive recall** - Short reminders or micro-lessons to prevent forgetting.  
+- **Tone and format personalization** - Reminders follow your preferred style.  
+- **Selective persistence** - Only stores items you mark as important.  
+- **Adaptive spacing** - Optionally change frequency based on feedback.  
+- **Low friction** - Natural-language config, not UI forms.
+
+## Primary Use Cases
+1. **Prevent skill drift**  
+   - Keep React nuances fresh while you work on ML.  
+2. **Efficient microlearning**  
+   - System design in 2-minute daily bites for steady progress.  
+3. **Retention of nuanced rules**  
+   - Remind hyperparameter heuristics, API quirks, or common gotchas.  
+4. **Passive repetition**  
+   - Exposure-driven recall without active searching.
+
 ---
 ## Features
 - 🧠 **Persistent Memory** — Conversation history stored in MongoDB; the agent recalls prior exchanges across sessions.
